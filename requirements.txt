@@ -1,0 +1,7 @@
+djangorestframework
+django-cors-headers
+python-dotenv
+djangorestframework-simplejwt
+django-filter
+Pillow
+whitenoise

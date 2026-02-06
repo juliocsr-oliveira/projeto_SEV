@@ -37,10 +37,11 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
+
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddlware',
-    'corsheaders.middlware.CorsMiddlware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -73,7 +74,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': os.getenv('DB_ENGINE'),
+        'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv ('DB_NAME'),
         'USER': os.getenv('DB_USER'),
         'PASSWORD': os.getenv('DB_PASSWORD'),
@@ -128,7 +129,7 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 # Primeira key e tipo de campo
-DEFAULT_AUTO_FIELD = 'django.mb.models.BigAutoField'
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # REST Framework
 REST_FRAMEWORK = {
@@ -150,25 +151,29 @@ REST_FRAMEWORK = {
 
 from datetime import timedelta
 
+from datetime import timedelta
+
 SIMPLE_JWT = {
-    'ACESS_TOKEN_LIFETIME':
-timedelta(hours=int(os.getenv('JWT_EXPIRATION_HOURS', 24))),
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=int(os.getenv('JWT_EXPIRATION_HOURS', 24))),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': False,
     'BLACKLIST_AFTER_ROTATION': False,
+
     'ALGORITHM': 'HS256',
-    'SIGNING_KEY': os.getenv('JWT_SECRET', 'SECRET_KEY'),
-    'VERIFYING_KEY': None,
+    'SIGNING_KEY': os.getenv('JWT_SECRET', SECRET_KEY),
+
     'AUTH_HEADER_TYPES': ('Bearer',),
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
-    'AUTH_TOKEN_CLASSES':
-    ('rest_framework_simplejwt.tokens.AcessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
 }
 
 # CORS
-CORS_ALLWED_ORIGINS = os.getenv('CORS_ALLWED_ORIGINS', 'http://localhost:5173').split(',')
+CORS_ALLWED_ORIGINS = os.getenv(
+    'CORS_ALLWED_ORIGINS',
+    'http://localhost:5173'
+    ).split(',')
+
 CORS_ALLOW_CREDENTIALS = True
 
 # Segurança(PRD)

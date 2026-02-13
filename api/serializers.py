@@ -15,7 +15,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = ('id', 'user', 'role', 'active', 'created_at')
 
 class UserDetailSerializer(serializers.ModelSerializer):
-    profile = UserProfileSerializer(source='profile', read_only=True)
+    profile = UserProfileSerializer(read_only=True)
 
     class Meta:
         model = User
@@ -27,6 +27,7 @@ class GMUDVersionSerializer(serializers.ModelSerializer):
     class Meta:
         model = GMUDVersion
         fields = ('id', 'version', 'description', 'created_by', 'created_by_name', 'created_at')
+        read_only_fields = ('created_by','created_at')
 
 class TestCaseSerializer(serializers.ModelSerializer):
     class Meta:

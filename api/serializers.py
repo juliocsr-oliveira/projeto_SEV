@@ -29,10 +29,50 @@ class GMUDVersionSerializer(serializers.ModelSerializer):
         fields = ('id', 'version', 'description', 'created_by', 'created_by_name', 'created_at')
         read_only_fields = ('created_by','created_at')
 
+class TestExecutionInlineSerializer(serializers.ModelSerializer):
+    executed_by_name = serializers.CharField(
+        source='executed_by.get_full_name',
+        read_only=True
+    )
+
+    class Meta:
+        model = TestExecution
+        fields = (
+            'id',
+            'status',
+            'comment',
+            'executed_by',
+            'executed_by_name',
+            'executed_at'
+        )        
+
 class TestCaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestCase
-        fields = ('id', 'test_plan', 'description', 'order_index', 'active', 'created_at')
+        fields = ('id', 'test_plan', 'description', 'order_index', 'active', 'status', 'created_at')
+
+class TestCaseDetailSerializer(serializers.ModelSerializer):
+    executions = TestExecutionInlineSerializer(many=True, read_only=True)
+    execution_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TestCase
+        fields = (
+            'id',
+            'test_plan',
+            'description',
+            'order_index',
+            'active',
+            'status',
+            'execution_count',
+            'executions',
+            'created_at'
+        )
+
+    def get_execution_count(self, obj):
+        return obj.executions.count()
+    
+
 
 class TestPlanListSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
@@ -42,12 +82,13 @@ class TestPlanListSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestPlan
         fields = (
-            'id', 'name', 'division', 'system', 'environment', 'status', 'validation_type', 
+            'id', 'name', 'division', 'system', 'environment', 'status', 'validation_type', 'status', 
             'created_by', 'created_by_name', 'responsible', 'responsible_name', 'test_case_count', 'created_at'
         )
+        read_only_fields = ('created_by', 'created_at')
 
-        def get_test_cases_count(self, obj):
-            return obj.test_cases.count()
+    def get_test_case_count(self, obj):
+        return obj.test_cases.count()
         
 class TestPlanDetailSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
@@ -57,10 +98,11 @@ class TestPlanDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestPlan
         fields = (
-            'id', 'name', 'description', 'division', 'system', 'environment', 'validation_type'
-            'status', 'access_key', 'gmud_version', 'created_by', 'created_by_name', 'responsible'
-            'responsible', 'responsible_name', 'test_cases', 'created_at', 'updated_at'
+            'id', 'name', 'description', 'division', 'system', 'environment', 'validation_type',
+            'status', 'access_key', 'gmud_version', 'created_by', 'created_by_name', 'responsible', 
+            'responsible_name', 'test_cases', 'created_at', 'updated_at'
         )
+        read_only_fields = ('created_by', 'access_key', 'created_at', 'updated_at')
 
 class TestExecutionSerializer(serializers.ModelSerializer):
     executed_by_name = serializers.CharField(source='executed_by.get_full_name', read_only=True)
@@ -68,6 +110,15 @@ class TestExecutionSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestExecution
         fields = ('id', 'test_case', 'executed_by', 'executed_by_name', 'status', 'comment', 'executed_at')
+        read_only_fields = ('executed_by', 'executed_at')
+    
+    def validate(self, data):
+        test_case = data['test_case']
+        if not test_case.active:
+            raise serializers.ValidationError(
+                "Não é possível executar um TestCase inativo"
+            )
+        return data
 
 class EvidenceSerializer(serializers.ModelSerializer):
     class Meta:

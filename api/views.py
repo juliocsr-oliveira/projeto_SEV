@@ -16,7 +16,7 @@ from .serializers import (
     UserSerializer, UserProfileSerializer, UserDetailSerializer,
     GMUDVersionSerializer, TestPlanListSerializer, TestPlanDetailSerializer,
     TestCaseSerializer, TestExecutionSerializer, EvidenceSerializer,
-    AuditLogSerializer
+    AuditLogSerializer, TestCaseDetailSerializer, TestExecution
 )
 from .permissions import IsAdmin, IsAuditorOrAdmin, IsOwnerOrAdmin
  
@@ -106,6 +106,11 @@ class TestCaseViewSet(viewsets.ModelViewSet):
     filterset_fields = ['test_plan', 'active']
     ordering_fields = ['order_index', 'created_at']
     ordering = ['order_index']
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return TestCaseDetailSerializer
+        return TestCaseSerializer
  
 class TestExecutionViewSet(viewsets.ModelViewSet):
     queryset = TestExecution.objects.all()

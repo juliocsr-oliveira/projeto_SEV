@@ -1,7 +1,8 @@
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import User
 from django.core.validators import MinLengthValidator
 import uuid
+from django.conf import settings
 
 class UserProfile(models.Model):
     ROLE_CHOICES = (
@@ -61,24 +62,41 @@ class TestPlan(models.Model):
     system = models.CharField(max_length=100)
     environment = models.CharField(max_length=50)
     validation_type = models.CharField(max_length=50, choices=VALIDATION_TYPE_CHOICES)
-    status = models.CharField(max_length=30, choices=STATUS_CHOICE, default='AGUARDANDO TESTE')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICE, default='AGUARDANDO_TESTE')
     access_key = models.CharField(max_length=100, unique=True, validators=[MinLengthValidator(10)])
-    gmud_version = models.ForeignKey(GMUDVersion, on_delete=models.SET_NULL, null=True, blank=True, related_name= 'test_plan')
-    created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name='created_test_plan')
-    responsible = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='responsible_test_plan')
+    gmud_version = models.ForeignKey(GMUDVersion, on_delete=models.SET_NULL, null=True, blank=True, related_name= 'test_plans')
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name='created_test_plans')
+    responsible = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='responsible_test_plans')
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = 'Plano de Teste'
         verbose_name_plural = 'Plano de Teste'
         ordering = ['-created_at']
-        indexes = [models.Index(fields=['-status']), models.Index(fields=['created_by']),]
+        indexes = [
+            models.Index(fields=['-status']), 
+            models.Index(fields=['created_by']),
+]
 
     def __str__(self):
         return self.name
     
 class TestCase(models.Model):
+    
+    STATUS_CHOICES = [
+        ('PENDENTE', 'Pendente'),
+        ('OK', 'Ok'),
+        ('FALHOU', 'Falhou'),
+    ]
+    
+    status = models.CharField(
+        max_length = 20, 
+        choices = STATUS_CHOICES, 
+        default ='PENDENTE'
+    )
+   
+
     id = models. UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     test_plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name='test_cases')
     description = models.TextField()
@@ -94,8 +112,9 @@ class TestCase(models.Model):
 
     def __str__(self):
         return f"{self.test_plan.name} - Caso {self.order_index}"
-    
+
 class TestExecution(models.Model):
+
     STATUS_CHOICES = (
         ('OK', 'OK'),
         ('FALHOU', 'Falhou'),
@@ -103,20 +122,70 @@ class TestExecution(models.Model):
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    test_case = models.ForeignKey(TestCase, on_delete=models.CASCADE, related_name='executions')
-    executed_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name='test_executions')
+    test_case = models.ForeignKey(
+        TestCase,
+        on_delete=models.CASCADE,
+        related_name='executions'
+    )
+    executed_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name='test_executions'
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
     comment = models.TextField(blank=True, null=True)
     executed_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         verbose_name = 'Execução de Teste'
-        verbose_name_plural = 'Execução de Testes'
+        verbose_name_plural = 'Execuções de Teste'
         ordering = ['-executed_at']
-        indexes = [models.Index(fields=['-executed_by']),]
+        indexes = [
+            models.Index(fields=['executed_by']),
+            models.Index(fields=['executed_at']),
+        ]
 
     def __str__(self):
         return f"{self.test_case} - {self.status}"
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+
+            test_case = self.test_case
+
+            # 🔹 Atualiza status do TestCase baseado na última execução
+            last_execution = test_case.executions.order_by('-executed_at').first()
+
+            if last_execution:
+                if last_execution.status == 'OK':
+                    test_case.status = 'OK'
+                elif last_execution.status == 'FALHOU':
+                    test_case.status = 'FALHOU'
+                else:
+                    test_case.status = 'PENDENTE'
+
+                test_case.save(update_fields=['status'])
+
+            # 🔹 Atualiza status do TestPlan
+            test_plan = test_case.test_plan
+            all_cases = test_plan.test_cases.all()
+
+            total_cases = all_cases.count()
+            pending_cases = all_cases.filter(status='PENDENTE').count()
+            failed_cases = all_cases.filter(status='FALHOU').count()
+
+            if total_cases == pending_cases:
+                test_plan.status = 'AGUARDANDO_TESTE'
+            elif failed_cases > 0:
+                test_plan.status = 'FALHOU'
+            elif pending_cases == 0:
+                test_plan.status = 'CONCLUIDO'
+            else:
+                test_plan.status = 'EM_PROGRESSO'
+
+            test_plan.save(update_fields=['status'])
+
     
 class Evidence(models.Model):
     FILE_TYPE_CHOICES = (
@@ -140,7 +209,7 @@ class Evidence(models.Model):
     
 class AuditLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_logs')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='audit_logs')
     action = models.CharField(max_length=255)
     entity = models.CharField(max_length=100, blank=True, null=True)
     entity_id = models.UUIDField(blank=True, null=True)
@@ -151,7 +220,10 @@ class AuditLog(models.Model):
         verbose_name = 'Log de Auditoria'
         verbose_name_plural = 'Logs de Auditoria'
         ordering = ['-created_at']
-        indexes = [models.Index(fields=['user']), models.Index(fields=['created_at']),]
+        indexes = [
+            models.Index(fields=['user']), 
+            models.Index(fields=['created_at']),
+]
 
     def __str__(self):
         return f"{self.user} - {self.action}"        

@@ -5,3 +5,4 @@ djangorestframework-simplejwt
 django-filter
 Pillow
 whitenoise
+psycopg2-binary

@@ -2,6 +2,7 @@ from rest_framework.permissions import BasePermission
 
 
 class IsAuditorOrAdmin(BasePermission):
+    """Permite superuser, staff, auditores e administradores"""
     def has_permission(self, request, view):
         if request.user.is_superuser:
             return True
@@ -23,18 +24,6 @@ class IsAdmin(BasePermission):
             hasattr(request.user, 'profile') and
             request.user.profile.role == 'ADMIN'
         )
-
-
-class IsAuditorOrAdmin(BasePermission):
-    """Apenas Auditores ou Administradores"""
-    def has_permission(self, request, view):
-        return (
-            request.user and
-            request.user.is_authenticated and
-            hasattr(request.user, 'profile') and
-            request.user.profile.role in ['AUDITOR', 'ADMIN']
-        )
-
 
 class IsOwnerOrAdmin(BasePermission):
     """Apenas o proprietário ou Administrador"""

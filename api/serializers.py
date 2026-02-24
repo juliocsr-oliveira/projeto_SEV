@@ -14,12 +14,32 @@ class UserProfileSerializer(serializers.ModelSerializer):
         model = UserProfile
         fields = ('id', 'user', 'role', 'active', 'created_at')
 
-class UserDetailSerializer(serializers.ModelSerializer):
-    profile = UserProfileSerializer(read_only=True)
+class UserMeSerializer(serializers.ModelSerializer):
+    role = serializers.SerializerMethodField()
+    active = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'profile')
+        fields = (
+            'id',
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'role',
+            'active',
+        )
+
+    def get_role(self, obj):
+        if hasattr(obj, 'profile') and obj.profile:
+            return obj.profile.role
+        return None
+
+    def get_active(self, obj):
+        if hasattr(obj, 'profile') and obj.profile:
+            return obj.profile.active
+        return False
+
 
 class GMUDVersionSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField (source='created_by.get_full_name', read_only=True)

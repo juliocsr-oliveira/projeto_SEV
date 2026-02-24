@@ -13,7 +13,7 @@ from .models import (
     TestExecution, Evidence, AuditLog
 )
 from .serializers import (
-    UserSerializer, UserProfileSerializer, UserDetailSerializer,
+    UserSerializer, UserProfileSerializer, UserMeSerializer,
     GMUDVersionSerializer, TestPlanListSerializer, TestPlanDetailSerializer,
     TestCaseSerializer, TestExecutionSerializer, EvidenceSerializer,
     AuditLogSerializer, TestCaseDetailSerializer, TestExecution
@@ -23,7 +23,7 @@ from .permissions import IsAdmin, IsAuditorOrAdmin, IsOwnerOrAdmin
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated, IsAdmin]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['profile__role', 'profile__active']
     search_fields = ['username', 'email', 'first_name', 'last_name']
@@ -35,13 +35,13 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def get_serializer_class(self):
         if self.action == 'retrieve':
-            return UserDetailSerializer
+            return UserMeSerializer
         return UserSerializer
     
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def me(self, request):
         """Obter dados do usuário autenticado"""
-        serializer = UserDetailSerializer(request.user)
+        serializer = UserMeSerializer(request.user)
         return Response(serializer.data)
  
 class GMUDVersionViewSet(viewsets.ModelViewSet):

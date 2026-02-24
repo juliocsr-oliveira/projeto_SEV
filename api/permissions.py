@@ -4,10 +4,10 @@ from rest_framework.permissions import BasePermission
 class IsAuditorOrAdmin(BasePermission):
     """Permite superuser, staff, auditores e administradores"""
     def has_permission(self, request, view):
-        if request.user.is_superuser:
-            return True
+        if not request.user or not request.user.is_authenticated:
+            return False
 
-        if request.user.is_staff:
+        if request.user.is_superuser or request.user.is_staff:
             return True
 
         if hasattr(request.user, 'profile'):
@@ -28,10 +28,13 @@ class IsAdmin(BasePermission):
 class IsOwnerOrAdmin(BasePermission):
     """Apenas o proprietário ou Administrador"""
     def has_object_permission(self, request, view, obj):
-        return (
-            obj.user == request.user or
-            (
-                hasattr(request.user, 'profile') and
-                request.user.profile.role == 'ADMIN'
-            )
-        )
+        if not request.user or not request.user.is_authenticated:
+            return False
+        
+        if hasattr(obj, 'user') and obj.user == request.user:
+            return True
+        
+        if hasattr(request.user, 'profile') and request.user.profile.role == 'ADMIN':
+            return True
+        
+        return False

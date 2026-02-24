@@ -70,6 +70,7 @@ class TestCaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestCase
         fields = ('id', 'test_plan', 'description', 'order_index', 'active', 'status', 'created_at')
+        read_only_fields = ('id', 'test_plan', 'order_index', 'created_at')
 
 class TestCaseDetailSerializer(serializers.ModelSerializer):
     executions = TestExecutionInlineSerializer(many=True, read_only=True)
@@ -92,7 +93,6 @@ class TestCaseDetailSerializer(serializers.ModelSerializer):
     def get_execution_count(self, obj):
         return obj.executions.count()
     
-
 
 class TestPlanListSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)

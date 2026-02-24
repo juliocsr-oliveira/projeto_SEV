@@ -85,11 +85,16 @@ class TestPlanViewSet(viewsets.ModelViewSet):
     def add_test_case(self, request, pk=None):
         """Adicionar caso de teste ao plano"""
         test_plan = self.get_object()
+
         serializer = TestCaseSerializer(data=request.data)
         
         if serializer.is_valid():
-            serializer.save(test_plan=test_plan)
+            last_order = test_plan.test_cases.count()
+
+            serializer.save(test_plan=test_plan, order_index=last_order +1)
+
             return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=True, methods=['get'])
@@ -97,6 +102,21 @@ class TestPlanViewSet(viewsets.ModelViewSet):
         """Obter chave de acesso do plano"""
         test_plan = self.get_object()
         return Response({'access_key': test_plan.access_key})
+    
+    @action(detail=False, methods=['get'])
+    def by_access_key(self, request):
+        key = request.query_params.get("key")
+
+        if not key:
+            return Response(
+                {"error" : "Access key é necessária"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        test_plan = get_object_or_404(TestPlan, access_key=key)
+        serializer = TestPlanDetailSerializer(test_plan)
+
+        return Response(serializer.data)
  
 class TestCaseViewSet(viewsets.ModelViewSet):
     queryset = TestCase.objects.all()

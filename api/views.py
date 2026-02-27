@@ -10,13 +10,13 @@ import secrets
  
 from .models import (
     UserProfile, GMUDVersion, TestPlan, TestCase,
-    TestExecution, Evidence, AuditLog
+    TestExecution, Evidence, AuditLog, ValidationSession
 )
 from .serializers import (
     UserSerializer, UserProfileSerializer, UserMeSerializer,
     GMUDVersionSerializer, TestPlanListSerializer, TestPlanDetailSerializer,
     TestCaseSerializer, TestExecutionSerializer, EvidenceSerializer,
-    AuditLogSerializer, TestCaseDetailSerializer, TestExecution
+    AuditLogSerializer, TestCaseDetailSerializer, TestExecution, ValidationSessionSerializer
 )
 from .permissions import IsAdmin, IsAuditorOrAdmin, IsOwnerOrAdmin
  
@@ -58,15 +58,19 @@ class GMUDVersionViewSet(viewsets.ModelViewSet):
  
 class TestPlanViewSet(viewsets.ModelViewSet):
     queryset = TestPlan.objects.all()
-    permission_classes = [IsAuthenticated, IsAuditorOrAdmin]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'validation_type', 'environment', 'division']
     search_fields = ['name', 'description', 'division', 'system']
     ordering_fields = ['created_at', 'name', 'status']
     ordering = ['-created_at']
+
+    def get_permissions(self):
+        if self.action in ['create','update', 'partial_update', 'destroy', 'add_test_case', 'access_key']:
+            return [IsAuthenticated(), IsAuditorOrAdmin()]
+        return [IsAuthenticated()]
     
     def get_serializer_class(self):
-        if self.action == 'retrieve':
+        if self.action in ['retrieve', 'create']:
             return TestPlanDetailSerializer
         return TestPlanListSerializer
     
@@ -97,27 +101,24 @@ class TestPlanViewSet(viewsets.ModelViewSet):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-    @action(detail=True, methods=['get'])
-    def access_key(self, request, pk=None):
-        """Obter chave de acesso do plano"""
-        test_plan = self.get_object()
-        return Response({'access_key': test_plan.access_key})
-    
-    @action(detail=False, methods=['get'])
-    def by_access_key(self, request):
-        key = request.query_params.get("key")
-
-        if not key:
+    @action(detail=False, methods=['get'], url_path='by-key/(?P<access_key>[^/.]+)')
+    def by_key(self, request, access_key=None):
+        try:
+            test_plan = TestPlan.objects.get(access_key=access_key)
+            serializer = self.get_serializer(test_plan)
+            return Response(serializer.data)
+        except TestPlan.DoesNotExist:
             return Response(
-                {"error" : "Access key é necessária"},
-                status=status.HTTP_400_BAD_REQUEST
+                {"detail": "TestPlan not found."},
+                status=status.HTTP_404_NOT_FOUND
             )
-        
-        test_plan = get_object_or_404(TestPlan, access_key=key)
-        serializer = TestPlanDetailSerializer(test_plan)
-
-        return Response(serializer.data)
- 
+    @action(detail=True, methods=['post'])
+    def configurar(self, request, pk=None):
+        plan = self.get_object()
+        plan.configurar()
+        return Response({"detail": "Plano configurado com sucesso"})
+    
+    
 class TestCaseViewSet(viewsets.ModelViewSet):
     queryset = TestCase.objects.all()
     serializer_class = TestCaseSerializer
@@ -167,3 +168,21 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['action', 'entity']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
+
+class ValidationSessionViewSet(viewsets.ModelViewSet):
+    queryset = ValidationSession.objects.all()
+    serializer_class = ValidationSessionSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['test_plan', 'status']
+    ordering_fields = ['started_at']
+    ordering = ['-started_at']
+
+    def perform_create(self, serializer):
+        serializer.save(started_by=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def finalize(self, request, pk=None):
+        session = self.get_object()
+        session.finalize()
+        return Response({"detail": "Sessão finalizada com sucesso"})

@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .views import (UserViewSet, GMUDVersionViewSet, TestPlanViewSet, TestCaseViewSet, TestExecutionViewSet, EvidenceViewSet, AuditLogViewSet)
+from .views import (UserViewSet, GMUDVersionViewSet, TestPlanViewSet, TestCaseViewSet, TestExecutionViewSet, EvidenceViewSet, AuditLogViewSet, ValidationSessionViewSet)
 
 router = DefaultRouter()
 router.register (r'users', UserViewSet)
@@ -11,6 +11,7 @@ router.register (r'test-case', TestCaseViewSet)
 router.register (r'test-executions', TestExecutionViewSet)
 router.register (r'evidences', EvidenceViewSet)
 router.register (r'audit-logs', AuditLogViewSet)
+router.register (r'validation-sessions', ValidationSessionViewSet)
 
 urlpatterns = [   path('', include(router.urls)),
     path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import (UserProfile, GMUDVersion, TestPlan, TestCase, TestExecution, Evidence, AuditLog)
+from .models import (UserProfile, GMUDVersion, TestPlan, TestCase, TestExecution, Evidence, AuditLog, ValidationSession)
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -69,8 +69,22 @@ class TestExecutionInlineSerializer(serializers.ModelSerializer):
 class TestCaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestCase
-        fields = ('id', 'test_plan', 'description', 'order_index', 'active', 'status', 'created_at')
-        read_only_fields = ('id', 'test_plan', 'order_index', 'created_at')
+        fields = ('id', 'test_plan', 'description', 'order_index', 'active', 'created_at')
+        read_only_fields = ('id', 'order_index', 'created_at', 'test_plan')
+
+    def create(self, validated_data):
+        test_plan = validated_data['test_plan']
+
+        last_case = (
+            TestCase.objects.filter(test_plan=test_plan)
+            .order_by('-order_index')
+            .first()
+        )
+
+        next_order = 1 if not last_case else last_case.order_index + 1
+
+        validated_data['order_index'] = next_order
+        return super().create(validated_data)
 
 class TestCaseDetailSerializer(serializers.ModelSerializer):
     executions = TestExecutionInlineSerializer(many=True, read_only=True)
@@ -84,7 +98,6 @@ class TestCaseDetailSerializer(serializers.ModelSerializer):
             'description',
             'order_index',
             'active',
-            'status',
             'execution_count',
             'executions',
             'created_at'
@@ -102,7 +115,7 @@ class TestPlanListSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestPlan
         fields = (
-            'id', 'name', 'division', 'system', 'environment', 'status', 'validation_type', 'status', 
+            'id', 'name', 'division', 'system', 'environment', 'status', 'validation_type', 
             'created_by', 'created_by_name', 'responsible', 'responsible_name', 'test_case_count', 'created_at'
         )
         read_only_fields = ('created_by', 'created_at')
@@ -122,22 +135,35 @@ class TestPlanDetailSerializer(serializers.ModelSerializer):
             'status', 'access_key', 'gmud_version', 'created_by', 'created_by_name', 'responsible', 
             'responsible_name', 'test_cases', 'created_at', 'updated_at'
         )
-        read_only_fields = ('created_by', 'access_key', 'created_at', 'updated_at')
+        read_only_fields = ('created_by', 'access_key', 'status', 'created_at', 'updated_at')
 
 class TestExecutionSerializer(serializers.ModelSerializer):
     executed_by_name = serializers.CharField(source='executed_by.get_full_name', read_only=True)
 
     class Meta:
         model = TestExecution
-        fields = ('id', 'test_case', 'executed_by', 'executed_by_name', 'status', 'comment', 'executed_at')
+        fields = ('id', 'session', 'test_case', 'executed_by', 'executed_by_name', 'status', 'comment', 'executed_at')
         read_only_fields = ('executed_by', 'executed_at')
     
     def validate(self, data):
         test_case = data['test_case']
+        session = data['session']
+
         if not test_case.active:
             raise serializers.ValidationError(
                 "Não é possível executar um TestCase inativo"
             )
+        
+        if session.status != session.Status.IN_PROGRESS:
+            raise serializers.ValidationError(
+                "Não é possível executar testes em uma sessão finalizada"
+            )
+        
+        if test_case.test_plan != session.test_plan:
+            raise serializers.ValidationError(
+                "O TestCase não pertence ao TestPlan da sessão"
+            )
+        
         return data
 
 class EvidenceSerializer(serializers.ModelSerializer):
@@ -152,4 +178,32 @@ class AuditLogSerializer(serializers.ModelSerializer):
         model = AuditLog
         fields = (
             'id', 'user', 'user_name', 'action', 'entity', 'entity_id', 'details', 'created_at'
+        )
+
+from .models import ValidationSession
+
+class ValidationSessionSerializer(serializers.ModelSerializer):
+    started_by_name = serializers.CharField(
+        source='started_by.get_full_name',
+        read_only=True
+    )
+    executions = TestExecutionInlineSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ValidationSession
+        fields = (
+            'id',
+            'test_plan',
+            'started_by',
+            'started_by_name',
+            'status',
+            'started_at',
+            'finished_at',
+            'executions'
+        )
+        read_only_fields = (
+            'started_by',
+            'status',
+            'started_at',
+            'finished_at'
         )

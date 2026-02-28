@@ -153,11 +153,17 @@ class TestExecution(models.Model):
         related_name='test_executions'
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
-    comment = models.TextField(blank=True, null=True)
+    comment = models.TextField(blank=True, null=False)
     executed_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-executed_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['session', 'test_case'],
+                name='unique_execution_per_test_case_per_session'
+            )
+        ]
 
     def __str__(self):
         return f"{self.test_case} - {self.status}"

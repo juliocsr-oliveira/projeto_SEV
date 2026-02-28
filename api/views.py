@@ -142,14 +142,25 @@ class TestExecutionViewSet(viewsets.ModelViewSet):
     ordering_fields = ['executed_at']
     ordering = ['-executed_at']
     
+class TestExecutionViewSet(viewsets.ModelViewSet):
+    queryset = TestExecution.objects.all()
+    serializer_class = TestExecutionSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['session', 'test_case', 'status']
+
     def perform_create(self, serializer):
-        serializer.save(executed_by=self.request.user)
-        # Log de auditoria
-        AuditLog.objects.create(
-            user=self.request.user,
-            action='CREATE',
-            entity='TestExecution',
-            entity_id=serializer.instance.id
+        test_case = serializer.validated_data['test_case']
+        session = serializer.validated_data['session']
+
+        obj, created = TestExecution.objects.update_or_create(
+            session=session,
+            test_case=test_case,
+            defaults={
+                'status': serializer.validated_data['status'],
+                'comment': serializer.validated_data.get('comment', ''),
+                'executed_by': self.request.user
+            }
         )
  
 class EvidenceViewSet(viewsets.ModelViewSet):

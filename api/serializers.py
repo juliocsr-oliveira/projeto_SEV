@@ -70,7 +70,7 @@ class TestCaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestCase
         fields = ('id', 'test_plan', 'description', 'order_index', 'active', 'created_at')
-        read_only_fields = ('id', 'order_index', 'created_at', 'test_plan')
+        read_only_fields = ('id', 'order_index', 'created_at')
 
     def create(self, validated_data):
         test_plan = validated_data['test_plan']

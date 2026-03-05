@@ -155,6 +155,7 @@ class TestExecution(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
     comment = models.TextField(blank=True, null=False)
     executed_at = models.DateTimeField(auto_now_add=True)
+    evidence = models.FileField(upload_to='evidence/')
 
     class Meta:
         ordering = ['-executed_at']
@@ -164,7 +165,7 @@ class TestExecution(models.Model):
                 name='unique_execution_per_test_case_per_session'
             )
         ]
-
+    
     def __str__(self):
         return f"{self.test_case} - {self.status}"
 

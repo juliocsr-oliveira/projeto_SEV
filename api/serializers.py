@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
+from django.db import transaction
 from .models import (UserProfile, GMUDVersion, TestPlan, TestCase, TestExecution, Evidence, AuditLog, ValidationSession)
 
 class UserSerializer(serializers.ModelSerializer):
@@ -94,13 +95,9 @@ class TestCaseDetailSerializer(serializers.ModelSerializer):
         model = TestCase
         fields = (
             'id',
-            'test_plan',
+            'name',
             'description',
             'order_index',
-            'active',
-            'execution_count',
-            'executions',
-            'created_at'
         )
 
     def get_execution_count(self, obj):
@@ -124,9 +121,9 @@ class TestPlanListSerializer(serializers.ModelSerializer):
         return obj.test_cases.count()
         
 class TestPlanDetailSerializer(serializers.ModelSerializer):
-    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
-    responsible_name = serializers.CharField(source='responsible.get_full_name', read_only=True)
-    test_cases = TestCaseSerializer(many=True, read_only=True)
+    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    responsible_name = serializers.CharField(source='responsible.username', read_only=True)
+    test_cases = TestCaseSerializer(many=True, required=False)
 
     class Meta:
         model = TestPlan
@@ -136,6 +133,17 @@ class TestPlanDetailSerializer(serializers.ModelSerializer):
             'responsible_name', 'test_cases', 'created_at', 'updated_at'
         )
         read_only_fields = ('created_by', 'access_key', 'status', 'created_at', 'updated_at')
+
+    def create(self, validated_data):
+
+        test_cases_data = validated_data.pop('test_cases', [])
+        with transaction.atomic():
+            test_plan = TestPlan.objects.create(**validated_data)
+
+            for case in test_cases_data:
+                TestCase.objects.create(test_plan=test_plan, **case)
+
+        return test_plan
 
 class TestExecutionSerializer(serializers.ModelSerializer):
     executed_by_name = serializers.CharField(source='executed_by.get_full_name', read_only=True)
@@ -179,8 +187,6 @@ class AuditLogSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'user', 'user_name', 'action', 'entity', 'entity_id', 'details', 'created_at'
         )
-
-from .models import ValidationSession
 
 class ValidationSessionSerializer(serializers.ModelSerializer):
     started_by_name = serializers.CharField(

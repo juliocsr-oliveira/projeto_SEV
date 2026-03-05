@@ -8,10 +8,10 @@ router.register (r'users', UserViewSet)
 router.register (r'gmud-versions', GMUDVersionViewSet)
 router.register (r'test-plans', TestPlanViewSet)
 router.register (r'test-case', TestCaseViewSet)
+router.register (r'validation-sessions', ValidationSessionViewSet)
 router.register (r'test-executions', TestExecutionViewSet)
 router.register (r'evidences', EvidenceViewSet)
 router.register (r'audit-logs', AuditLogViewSet)
-router.register (r'validation-sessions', ValidationSessionViewSet)
 
 urlpatterns = [   path('', include(router.urls)),
     path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),

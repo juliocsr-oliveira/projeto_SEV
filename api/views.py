@@ -16,7 +16,7 @@ from .serializers import (
     UserSerializer, UserProfileSerializer, UserMeSerializer,
     GMUDVersionSerializer, TestPlanListSerializer, TestPlanDetailSerializer,
     TestCaseSerializer, TestExecutionSerializer, EvidenceSerializer,
-    AuditLogSerializer, TestCaseDetailSerializer, TestExecution, ValidationSessionSerializer
+    AuditLogSerializer, TestCaseDetailSerializer, ValidationSessionSerializer
 )
 from .permissions import IsAdmin, IsAuditorOrAdmin, IsOwnerOrAdmin
  
@@ -59,21 +59,27 @@ class GMUDVersionViewSet(viewsets.ModelViewSet):
 class TestPlanViewSet(viewsets.ModelViewSet):
     queryset = TestPlan.objects.all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'validation_type', 'environment', 'division']
+    filterset_fields = ['status', 'validation_type', 'environment', 'division', 'sessions']
     search_fields = ['name', 'description', 'division', 'system']
     ordering_fields = ['created_at', 'name', 'status']
     ordering = ['-created_at']
-
+    
     def get_permissions(self):
         if self.action in ['create','update', 'partial_update', 'destroy', 'add_test_case', 'access_key']:
             return [IsAuthenticated(), IsAuditorOrAdmin()]
         return [IsAuthenticated()]
     
     def get_serializer_class(self):
-        if self.action in ['retrieve', 'create']:
+        if self.action in ['retrieve', 'by_key', 'create']:
             return TestPlanDetailSerializer
         return TestPlanListSerializer
     
+    def perform_create(self, serializer):
+        serializer.save(
+            created_by=self.request.user,
+            responsible=self.request.user
+        )
+        
     def perform_create(self, serializer):
         access_key = f"VAL-{secrets.token_hex(8).upper()}"
         serializer.save(created_by=self.request.user, access_key=access_key)
@@ -118,7 +124,6 @@ class TestPlanViewSet(viewsets.ModelViewSet):
         plan.configurar()
         return Response({"detail": "Plano configurado com sucesso"})
     
-    
 class TestCaseViewSet(viewsets.ModelViewSet):
     queryset = TestCase.objects.all()
     serializer_class = TestCaseSerializer
@@ -132,15 +137,6 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         if self.action == 'retrieve':
             return TestCaseDetailSerializer
         return TestCaseSerializer
- 
-class TestExecutionViewSet(viewsets.ModelViewSet):
-    queryset = TestExecution.objects.all()
-    serializer_class = TestExecutionSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['test_case', 'executed_by', 'status']
-    ordering_fields = ['executed_at']
-    ordering = ['-executed_at']
     
 class TestExecutionViewSet(viewsets.ModelViewSet):
     queryset = TestExecution.objects.all()
@@ -150,17 +146,13 @@ class TestExecutionViewSet(viewsets.ModelViewSet):
     filterset_fields = ['session', 'test_case', 'status']
 
     def perform_create(self, serializer):
-        test_case = serializer.validated_data['test_case']
-        session = serializer.validated_data['session']
-
-        obj, created = TestExecution.objects.update_or_create(
-            session=session,
-            test_case=test_case,
-            defaults={
-                'status': serializer.validated_data['status'],
-                'comment': serializer.validated_data.get('comment', ''),
-                'executed_by': self.request.user
-            }
+        serializer.save(executed_by=self.request.user)
+        # Log de auditoria
+        AuditLog.objects.create(
+            user=self.request.user,
+            action='CREATE',
+            entity='TestExecution',
+            entity_id=serializer.instance.id
         )
  
 class EvidenceViewSet(viewsets.ModelViewSet):

@@ -155,7 +155,7 @@ class TestExecution(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
     comment = models.TextField(blank=True, null=False)
     executed_at = models.DateTimeField(auto_now_add=True)
-    evidence = models.FileField(upload_to='evidence/')
+    evidence = models.FileField(upload_to='evidence/', null=True, blank=True)
 
     class Meta:
         ordering = ['-executed_at']

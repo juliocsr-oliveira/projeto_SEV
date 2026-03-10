@@ -1,4 +1,5 @@
 from rest_framework import viewsets, status, filters
+from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
@@ -187,5 +188,17 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def finalize(self, request, pk=None):
         session = self.get_object()
-        session.finalize()
-        return Response({"detail": "Sessão finalizada com sucesso"})
+        executions = session.executions.all()
+        if not executions.exists():
+            return Response(
+                {"detail": "Nenhuma execução registrada"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if executions.filter(status="FALHOU").exists():
+            session.status = "FAILED"
+
+        else:
+            session.status = "PASSED"
+
+        return Response({"message": "Sessão finalizada", "status": session.status})

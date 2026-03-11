@@ -1,4 +1,5 @@
 from rest_framework import viewsets, status, filters
+from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
@@ -7,6 +8,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 import secrets
+from django.utils import timezone
  
 from .models import (
     UserProfile, GMUDVersion, TestPlan, TestCase,
@@ -16,7 +18,7 @@ from .serializers import (
     UserSerializer, UserProfileSerializer, UserMeSerializer,
     GMUDVersionSerializer, TestPlanListSerializer, TestPlanDetailSerializer,
     TestCaseSerializer, TestExecutionSerializer, EvidenceSerializer,
-    AuditLogSerializer, TestCaseDetailSerializer, TestExecution, ValidationSessionSerializer
+    AuditLogSerializer, TestCaseDetailSerializer, ValidationSessionSerializer
 )
 from .permissions import IsAdmin, IsAuditorOrAdmin, IsOwnerOrAdmin
  
@@ -59,21 +61,27 @@ class GMUDVersionViewSet(viewsets.ModelViewSet):
 class TestPlanViewSet(viewsets.ModelViewSet):
     queryset = TestPlan.objects.all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'validation_type', 'environment', 'division']
+    filterset_fields = ['status', 'validation_type', 'environment', 'division', 'sessions']
     search_fields = ['name', 'description', 'division', 'system']
     ordering_fields = ['created_at', 'name', 'status']
     ordering = ['-created_at']
-
+    
     def get_permissions(self):
         if self.action in ['create','update', 'partial_update', 'destroy', 'add_test_case', 'access_key']:
             return [IsAuthenticated(), IsAuditorOrAdmin()]
         return [IsAuthenticated()]
     
     def get_serializer_class(self):
-        if self.action in ['retrieve', 'create']:
+        if self.action in ['retrieve', 'by_key', 'create']:
             return TestPlanDetailSerializer
         return TestPlanListSerializer
     
+    def perform_create(self, serializer):
+        serializer.save(
+            created_by=self.request.user,
+            responsible=self.request.user
+        )
+        
     def perform_create(self, serializer):
         access_key = f"VAL-{secrets.token_hex(8).upper()}"
         serializer.save(created_by=self.request.user, access_key=access_key)
@@ -118,7 +126,6 @@ class TestPlanViewSet(viewsets.ModelViewSet):
         plan.configurar()
         return Response({"detail": "Plano configurado com sucesso"})
     
-    
 class TestCaseViewSet(viewsets.ModelViewSet):
     queryset = TestCase.objects.all()
     serializer_class = TestCaseSerializer
@@ -132,15 +139,6 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         if self.action == 'retrieve':
             return TestCaseDetailSerializer
         return TestCaseSerializer
- 
-class TestExecutionViewSet(viewsets.ModelViewSet):
-    queryset = TestExecution.objects.all()
-    serializer_class = TestExecutionSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['test_case', 'executed_by', 'status']
-    ordering_fields = ['executed_at']
-    ordering = ['-executed_at']
     
 class TestExecutionViewSet(viewsets.ModelViewSet):
     queryset = TestExecution.objects.all()
@@ -150,25 +148,38 @@ class TestExecutionViewSet(viewsets.ModelViewSet):
     filterset_fields = ['session', 'test_case', 'status']
 
     def perform_create(self, serializer):
-        test_case = serializer.validated_data['test_case']
-        session = serializer.validated_data['session']
-
-        obj, created = TestExecution.objects.update_or_create(
-            session=session,
-            test_case=test_case,
-            defaults={
-                'status': serializer.validated_data['status'],
-                'comment': serializer.validated_data.get('comment', ''),
-                'executed_by': self.request.user
-            }
+        serializer.save(executed_by=self.request.user)
+        # Log de auditoria
+        AuditLog.objects.create(
+            user=self.request.user,
+            action='CREATE',
+            entity='TestExecution',
+            entity_id=serializer.instance.id
         )
  
 class EvidenceViewSet(viewsets.ModelViewSet):
+
     queryset = Evidence.objects.all()
     serializer_class = EvidenceSerializer
     permission_classes = [IsAuthenticated]
+
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['test_execution', 'file_type']
+
+    def perform_create(self, serializer):
+
+        evidence = serializer.save()
+
+        AuditLog.objects.create(
+            user=self.request.user,
+            action='UPLOAD',
+            entity='Evidence',
+            entity_id=evidence.id,
+            details={
+                "test_execution": str(evidence.test_execution.id),
+                "file_type": evidence.file_type
+            }
+        )
  
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AuditLog.objects.all()
@@ -192,8 +203,34 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(started_by=self.request.user)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def finalize(self, request, pk=None):
+
         session = self.get_object()
-        session.finalize()
-        return Response({"detail": "Sessão finalizada com sucesso"})
+
+        signature = request.data.get("signature")
+
+        if not signature:
+            return Response(
+            {"detail": "Assinatura obrigatória"},
+            status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+
+            session.signature = signature
+            session.signed_at = timezone.now()
+
+            session.finalize()  # chama lógica do model
+
+            return Response({
+                "message": "Sessão finalizada",
+                "status": session.status
+            })
+
+        except ValueError as e:
+
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )

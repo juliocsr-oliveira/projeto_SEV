@@ -164,7 +164,7 @@ class TestExecution(models.Model):
                 name='unique_execution_per_test_case_per_session'
             )
         ]
-
+    
     def __str__(self):
         return f"{self.test_case} - {self.status}"
 
@@ -222,7 +222,9 @@ class ValidationSession(models.Model):
     started_by = models.ForeignKey( User, on_delete=models.PROTECT, related_name="validation_sessions" ) 
     status = models.CharField( max_length=20, choices=Status.choices, default=Status.IN_PROGRESS ) 
     started_at = models.DateTimeField(auto_now_add=True) 
-    finished_at = models.DateTimeField(null=True, blank=True) 
+    finished_at = models.DateTimeField(null=True, blank=True)
+    signature = models.CharField(max_length=255, null=True, blank=True)
+    signed_at = models.DateTimeField(null=True, blank=True) 
     
     class Meta: 
         ordering = ['-started_at'] 
@@ -250,7 +252,7 @@ class ValidationSession(models.Model):
             self.status = self.Status.APPROVED 
             
         self.finished_at = timezone.now() 
-        self.save(update_fields=['status', 'finished_at']) 
+        self.save() 
             
     def __str__(self): 
         return f"{self.test_plan.name} - {self.status}"

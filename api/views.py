@@ -8,6 +8,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 import secrets
+from django.utils import timezone
  
 from .models import (
     UserProfile, GMUDVersion, TestPlan, TestCase,
@@ -157,11 +158,28 @@ class TestExecutionViewSet(viewsets.ModelViewSet):
         )
  
 class EvidenceViewSet(viewsets.ModelViewSet):
+
     queryset = Evidence.objects.all()
     serializer_class = EvidenceSerializer
     permission_classes = [IsAuthenticated]
+
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['test_execution', 'file_type']
+
+    def perform_create(self, serializer):
+
+        evidence = serializer.save()
+
+        AuditLog.objects.create(
+            user=self.request.user,
+            action='UPLOAD',
+            entity='Evidence',
+            entity_id=evidence.id,
+            details={
+                "test_execution": str(evidence.test_execution.id),
+                "file_type": evidence.file_type
+            }
+        )
  
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AuditLog.objects.all()
@@ -185,20 +203,34 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(started_by=self.request.user)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def finalize(self, request, pk=None):
+
         session = self.get_object()
-        executions = session.executions.all()
-        if not executions.exists():
+
+        signature = request.data.get("signature")
+
+        if not signature:
             return Response(
-                {"detail": "Nenhuma execução registrada"},
+            {"detail": "Assinatura obrigatória"},
+            status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+
+            session.signature = signature
+            session.signed_at = timezone.now()
+
+            session.finalize()  # chama lógica do model
+
+            return Response({
+                "message": "Sessão finalizada",
+                "status": session.status
+            })
+
+        except ValueError as e:
+
+            return Response(
+                {"detail": str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        if executions.filter(status="FALHOU").exists():
-            session.status = "FAILED"
-
-        else:
-            session.status = "PASSED"
-
-        return Response({"message": "Sessão finalizada", "status": session.status})

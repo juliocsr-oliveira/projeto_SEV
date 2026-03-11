@@ -175,9 +175,28 @@ class TestExecutionSerializer(serializers.ModelSerializer):
         return data
 
 class EvidenceSerializer(serializers.ModelSerializer):
+
     class Meta:
         model = Evidence
-        fields = ('id', 'test_execution', 'file', 'file_type', 'created_at')
+        fields = (
+            'id',
+            'test_execution',
+            'file',
+            'file_type',
+            'created_at'
+        )
+        read_only_fields = ('created_at',)
+
+    def validate_file(self, value):
+
+        max_size = 10 * 1024 * 1024  # 10MB
+
+        if value.size > max_size:
+            raise serializers.ValidationError(
+                "Arquivo muito grande (máximo 10MB)"
+            )
+
+        return value
 
 class AuditLogSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='user.get_full_name', read_only=True)

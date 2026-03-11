@@ -155,7 +155,6 @@ class TestExecution(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)
     comment = models.TextField(blank=True, null=False)
     executed_at = models.DateTimeField(auto_now_add=True)
-    evidence = models.FileField(upload_to='evidence/', null=True, blank=True)
 
     class Meta:
         ordering = ['-executed_at']
@@ -223,7 +222,9 @@ class ValidationSession(models.Model):
     started_by = models.ForeignKey( User, on_delete=models.PROTECT, related_name="validation_sessions" ) 
     status = models.CharField( max_length=20, choices=Status.choices, default=Status.IN_PROGRESS ) 
     started_at = models.DateTimeField(auto_now_add=True) 
-    finished_at = models.DateTimeField(null=True, blank=True) 
+    finished_at = models.DateTimeField(null=True, blank=True)
+    signature = models.CharField(max_length=255, null=True, blank=True)
+    signed_at = models.DateTimeField(null=True, blank=True) 
     
     class Meta: 
         ordering = ['-started_at'] 
@@ -232,9 +233,9 @@ class ValidationSession(models.Model):
         
         constraints = [
             models.UniqueConstraint(
-                fields = ['test_plan'], 
+                fields = ['test_plan', 'started_by'], 
                           condition= Q(status='IN_PROGRESS'),
-                          name = 'unique_active_session_per_plan')
+                          name = 'unique_user_active_session')
         ]
         
     def finalize(self):
@@ -251,7 +252,7 @@ class ValidationSession(models.Model):
             self.status = self.Status.APPROVED 
             
         self.finished_at = timezone.now() 
-        self.save(update_fields=['status', 'finished_at']) 
+        self.save() 
             
     def __str__(self): 
         return f"{self.test_plan.name} - {self.status}"

@@ -129,6 +129,7 @@ class TestCase(models.Model):
 class TestExecution(models.Model):
         
     STATUS_CHOICES = (
+        ('PENDENTE', 'Pendente'),
         ('OK', 'OK'),
         ('FALHOU', 'Falhou'),
         ('NAO_APLICA', 'Não se Aplica'),
@@ -152,8 +153,8 @@ class TestExecution(models.Model):
         on_delete=models.PROTECT,
         related_name='test_executions'
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
-    comment = models.TextField(blank=True, null=False)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDENTE')
+    comment = models.TextField(blank=True, null=True)
     executed_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -235,7 +236,7 @@ class ValidationSession(models.Model):
             models.UniqueConstraint(
                 fields = ['test_plan'], 
                           condition= Q(status='IN_PROGRESS'),
-                          name = 'unique_active_session_per_plan')
+                          name = 'unique_user_active_session')
         ]
         
     def finalize(self):

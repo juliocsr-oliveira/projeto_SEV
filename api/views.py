@@ -1,9 +1,8 @@
 from rest_framework import viewsets, status, filters
-from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
-from .permissions import IsAuditorOrAdmin
+from .permissions import IsAdmin, IsAuditorOrAdmin, IsOwnerOrAdmin
 from django_filters.rest_framework import DjangoFilterBackend
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
@@ -20,7 +19,7 @@ from .serializers import (
     TestCaseSerializer, TestExecutionSerializer, EvidenceSerializer,
     AuditLogSerializer, TestCaseDetailSerializer, ValidationSessionSerializer
 )
-from .permissions import IsAdmin, IsAuditorOrAdmin, IsOwnerOrAdmin
+
  
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -33,7 +32,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == 'me':
             return [IsAuthenticated()]
-        return [IsAuthenticated(), IsAdminUser()]
+        return [IsAuthenticated(), IsAdmin()]
     
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -77,21 +76,21 @@ class TestPlanViewSet(viewsets.ModelViewSet):
         return TestPlanListSerializer
     
     def perform_create(self, serializer):
-        serializer.save(
-            created_by=self.request.user,
-            responsible=self.request.user
-        )
-        
-    def perform_create(self, serializer):
+
         access_key = f"VAL-{secrets.token_hex(8).upper()}"
-        serializer.save(created_by=self.request.user, access_key=access_key)
-        # Log de auditoria
+
+        plan = serializer.save(
+            created_by=self.request.user,
+            responsible=self.request.user,
+            access_key=access_key
+    )
+
         AuditLog.objects.create(
             user=self.request.user,
             action='CREATE',
             entity='TestPlan',
-            entity_id=serializer.instance.id
-        )
+            entity_id=plan.id
+    )
     
     @action(detail=True, methods=['post'])
     def add_test_case(self, request, pk=None):
@@ -140,6 +139,64 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             return TestCaseDetailSerializer
         return TestCaseSerializer
     
+class ValidationSessionViewSet(viewsets.ModelViewSet):
+
+    queryset = ValidationSession.objects.all()
+    serializer_class = ValidationSessionSerializer
+    permission_classes = [IsAuthenticated]
+
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['test_plan', 'status']
+    ordering_fields = ['started_at']
+    ordering = ['-started_at']
+
+    def perform_create(self, serializer):
+
+        session = serializer.save(started_by=self.request.user)
+
+        # cria execuções para cada caso de teste
+        test_cases = session.test_plan.test_cases.filter(active=True)
+
+        for case in test_cases:
+            TestExecution.objects.create(
+                session=session,
+                test_case=case,
+                status="PENDENTE",
+                executed_by=self.request.user
+            )
+
+    @action(detail=True, methods=["post"])
+    def finalize(self, request, pk=None):
+
+        session = self.get_object()
+
+        signature = request.data.get("signature")
+
+        if not signature:
+            return Response(
+                {"detail": "Assinatura obrigatória"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+
+            session.signature = signature
+            session.signed_at = timezone.now()
+
+            session.finalize()
+
+            return Response({
+                "message": "Sessão finalizada",
+                "status": session.status
+            })
+
+        except ValueError as e:
+
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
 class TestExecutionViewSet(viewsets.ModelViewSet):
     queryset = TestExecution.objects.all()
     serializer_class = TestExecutionSerializer
@@ -147,15 +204,7 @@ class TestExecutionViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['session', 'test_case', 'status']
 
-    def perform_create(self, serializer):
-        serializer.save(executed_by=self.request.user)
-        # Log de auditoria
-        AuditLog.objects.create(
-            user=self.request.user,
-            action='CREATE',
-            entity='TestExecution',
-            entity_id=serializer.instance.id
-        )
+    http_method_names = ['get', 'patch', 'put']
  
 class EvidenceViewSet(viewsets.ModelViewSet):
 
@@ -190,47 +239,3 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['action', 'entity']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
-
-class ValidationSessionViewSet(viewsets.ModelViewSet):
-    queryset = ValidationSession.objects.all()
-    serializer_class = ValidationSessionSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['test_plan', 'status']
-    ordering_fields = ['started_at']
-    ordering = ['-started_at']
-
-    def perform_create(self, serializer):
-        serializer.save(started_by=self.request.user)
-
-    @action(detail=True, methods=["post"])
-    def finalize(self, request, pk=None):
-
-        session = self.get_object()
-
-        signature = request.data.get("signature")
-
-        if not signature:
-            return Response(
-            {"detail": "Assinatura obrigatória"},
-            status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-
-            session.signature = signature
-            session.signed_at = timezone.now()
-
-            session.finalize()  # chama lógica do model
-
-            return Response({
-                "message": "Sessão finalizada",
-                "status": session.status
-            })
-
-        except ValueError as e:
-
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )

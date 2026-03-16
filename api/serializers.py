@@ -51,6 +51,11 @@ class GMUDVersionSerializer(serializers.ModelSerializer):
         read_only_fields = ('created_by','created_at')
 
 class TestExecutionInlineSerializer(serializers.ModelSerializer):
+    test_case_name = serializers.CharField(
+        source='test_case.name',
+        read_only=True
+    )
+
     executed_by_name = serializers.CharField(
         source='executed_by.get_full_name',
         read_only=True
@@ -60,6 +65,8 @@ class TestExecutionInlineSerializer(serializers.ModelSerializer):
         model = TestExecution
         fields = (
             'id',
+            'test_case',
+            'test_case_name',
             'status',
             'comment',
             'executed_by',

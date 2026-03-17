@@ -52,7 +52,7 @@ class GMUDVersionSerializer(serializers.ModelSerializer):
 
 class TestExecutionInlineSerializer(serializers.ModelSerializer):
     test_case_name = serializers.CharField(
-        source='test_case.name',
+        source='test_case.description',
         read_only=True
     )
 
@@ -161,24 +161,24 @@ class TestExecutionSerializer(serializers.ModelSerializer):
         read_only_fields = ('executed_by', 'executed_at')
     
     def validate(self, data):
-        test_case = data['test_case']
-        session = data['session']
+        test_case = data.get('test_case') or self.instance.test_case
+        session = data.get('session') or self.instance.session
 
         if not test_case.active:
             raise serializers.ValidationError(
-                "Não é possível executar um TestCase inativo"
-            )
-        
+            "Não é possível executar um TestCase inativo"
+        )
+    
         if session.status != session.Status.IN_PROGRESS:
             raise serializers.ValidationError(
-                "Não é possível executar testes em uma sessão finalizada"
-            )
-        
+            "Não é possível executar testes em uma sessão finalizada"
+        )
+    
         if test_case.test_plan != session.test_plan:
             raise serializers.ValidationError(
-                "O TestCase não pertence ao TestPlan da sessão"
-            )
-        
+            "O TestCase não pertence ao TestPlan da sessão"
+        )
+    
         return data
 
 class EvidenceSerializer(serializers.ModelSerializer):

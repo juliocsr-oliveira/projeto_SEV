@@ -50,6 +50,30 @@ class GMUDVersionSerializer(serializers.ModelSerializer):
         fields = ('id', 'version', 'description', 'created_by', 'created_by_name', 'created_at')
         read_only_fields = ('created_by','created_at')
 
+class EvidenceSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Evidence
+        fields = (
+            'id',
+            'test_execution',
+            'file',
+            'file_type',
+            'created_at'
+        )
+        read_only_fields = ('created_at',)
+
+    def validate_file(self, value):
+
+        max_size = 10 * 1024 * 1024  # 10MB
+
+        if value.size > max_size:
+            raise serializers.ValidationError(
+                "Arquivo muito grande (máximo 10MB)"
+            )
+
+        return value
+
 class TestExecutionInlineSerializer(serializers.ModelSerializer):
     test_case_name = serializers.CharField(
         source='test_case.description',
@@ -61,6 +85,8 @@ class TestExecutionInlineSerializer(serializers.ModelSerializer):
         read_only=True
     )
 
+    evidences = EvidenceSerializer(many=True, read_only=True)
+
     class Meta:
         model = TestExecution
         fields = (
@@ -71,7 +97,8 @@ class TestExecutionInlineSerializer(serializers.ModelSerializer):
             'comment',
             'executed_by',
             'executed_by_name',
-            'executed_at'
+            'executed_at',
+            'evidences'
         )        
 
 class TestCaseSerializer(serializers.ModelSerializer):
@@ -181,30 +208,6 @@ class TestExecutionSerializer(serializers.ModelSerializer):
     
         return data
 
-class EvidenceSerializer(serializers.ModelSerializer):
-
-    class Meta:
-        model = Evidence
-        fields = (
-            'id',
-            'test_execution',
-            'file',
-            'file_type',
-            'created_at'
-        )
-        read_only_fields = ('created_at',)
-
-    def validate_file(self, value):
-
-        max_size = 10 * 1024 * 1024  # 10MB
-
-        if value.size > max_size:
-            raise serializers.ValidationError(
-                "Arquivo muito grande (máximo 10MB)"
-            )
-
-        return value
-
 class AuditLogSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='user.get_full_name', read_only=True)
 
@@ -215,17 +218,22 @@ class AuditLogSerializer(serializers.ModelSerializer):
         )
 
 class ValidationSessionSerializer(serializers.ModelSerializer):
-    started_by_name = serializers.CharField(
-        source='started_by.get_full_name',
-        read_only=True
-    )
+    started_by_name = serializers.CharField(source='started_by.get_full_name', read_only=True)
+    gmud_version = serializers.CharField(source='test_plan.gmud_version.version', read_only=True)
     executions = TestExecutionInlineSerializer(many=True, read_only=True)
+    test_plan_system = serializers.CharField(source='test_plan.system', read_only=True)
+    test_plan_name = serializers.CharField(source='test_plan.name', read_only=True)
+    test_plan_environment = serializers.CharField(source='test_plan.environment', read_only=True)
 
     class Meta:
         model = ValidationSession
         fields = (
             'id',
             'test_plan',
+            'gmud_version',
+            'test_plan_system',
+            'test_plan_environment',
+            'test_plan_name',
             'started_by',
             'started_by_name',
             'status',

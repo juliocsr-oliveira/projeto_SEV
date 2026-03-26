@@ -4,9 +4,92 @@ from django.db import transaction
 from .models import (UserProfile, GMUDVersion, TestPlan, TestCase, TestExecution, Evidence, AuditLog, ValidationSession)
 
 class UserSerializer(serializers.ModelSerializer):
+    role = serializers.SerializerMethodField()
+    active = serializers.SerializerMethodField()
+    role_write = serializers.CharField(write_only=True, required=False)
+    active_write = serializers.BooleanField(write_only=True, required=False)
+    username = serializers.CharField(read_only=True)
+
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'first_name', 'last_name',)
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'role', 'active', 'role_write', 'active_write',) 
+
+    # ========================
+    # READ
+    # ========================
+    def get_role(self, obj):
+        if hasattr(obj, 'profile'):
+            return obj.profile.role
+        return None
+
+    def get_active(self, obj):
+        if hasattr(obj, 'profile'):
+            return obj.profile.active
+        return False
+
+    # ========================
+    # CREATE
+    # ========================
+    def create(self, validated_data):
+        with transaction.atomic():  # 🔥 ISSO RESOLVE TUDO
+
+            role = validated_data.pop('role_write', 'TESTADOR')
+            role = role.upper() if role else 'TESTADOR'
+
+            active = validated_data.pop('active_write', True)
+
+            email = validated_data.get('email')
+            if not email:
+                raise serializers.ValidationError({"email": "Campo obrigatório"})
+
+            user = User.objects.create_user(
+                username=email,
+                email=email,
+                first_name=validated_data.get('first_name', ''),
+                last_name=validated_data.get('last_name', ''),
+                password='123456'
+            )
+
+            UserProfile.objects.create(
+                user=user,
+                role=role,
+                active=active
+            )
+
+            return user
+
+
+    # ========================
+    # UPDATE (EDITAR ROLE/STATUS)
+    # ========================
+    def update(self, instance, validated_data):
+        role = validated_data.pop('role_write', None)
+        active = validated_data.pop('active_write', None)
+
+        # Atualiza dados básicos
+        if 'first_name' in validated_data:
+            instance.first_name = validated_data['first_name']
+
+        if 'last_name' in validated_data:
+            instance.last_name = validated_data['last_name']
+
+        if 'email' in validated_data:
+            instance.email = validated_data['email']
+            instance.username = validated_data['email'] 
+
+        instance.save()
+
+        # Atualiza profile
+        if hasattr(instance, 'profile'):
+            if role:
+                instance.profile.role = role.upper()
+
+            if active is not None:
+                instance.profile.active = active
+
+            instance.profile.save()
+
+        return instance
 
 class UserProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
@@ -224,6 +307,7 @@ class ValidationSessionSerializer(serializers.ModelSerializer):
     test_plan_system = serializers.CharField(source='test_plan.system', read_only=True)
     test_plan_name = serializers.CharField(source='test_plan.name', read_only=True)
     test_plan_environment = serializers.CharField(source='test_plan.environment', read_only=True)
+    test_plan_division = serializers.CharField(source='test_plan.division', read_only=True)
 
     class Meta:
         model = ValidationSession
@@ -232,6 +316,7 @@ class ValidationSessionSerializer(serializers.ModelSerializer):
             'test_plan',
             'gmud_version',
             'test_plan_system',
+            'test_plan_division',
             'test_plan_environment',
             'test_plan_name',
             'started_by',
@@ -239,6 +324,7 @@ class ValidationSessionSerializer(serializers.ModelSerializer):
             'status',
             'started_at',
             'finished_at',
+            'signature',
             'executions'
         )
         read_only_fields = (

@@ -165,6 +165,12 @@ class TestExecution(models.Model):
                 name='unique_execution_per_test_case_per_session'
             )
         ]
+
+    def save(self, *args, **kwargs):
+        if self.session.status != "IN_PROGRESS":
+            raise ValueError("Sessão finalizada. Não é permitido alterar execuções.")
+
+        super().save(*args, **kwargs)
     
     def __str__(self):
         return f"{self.test_case} - {self.status}"
@@ -241,19 +247,25 @@ class ValidationSession(models.Model):
         
     def finalize(self):
         if self.status != self.Status.IN_PROGRESS:
-            raise ValueError("Sessão já finalizada.") 
-        executions = self.executions.all() 
+            raise ValueError("Sessão já finalizada.")
+        
+        if not self.signature:
+            raise ValueError("Assinatura é obrigatória para finalizar a sessão.")
+
+        executions = self.executions.all()
 
         if not executions.exists():
             raise ValueError("Não é possível finalizar sessão sem execuções.")
-        
-        if executions.filter(status='FALHOU').exists(): 
-            self.status = self.Status.FAILED 
-        else: 
-            self.status = self.Status.APPROVED 
-            
-        self.finished_at = timezone.now() 
-        self.save() 
-            
-    def __str__(self): 
-        return f"{self.test_plan.name} - {self.status}"
+
+        # 🔒 NOVA REGRA CRÍTICA
+        if executions.filter(status='PENDENTE').exists():
+            raise ValueError("Existem testes pendentes. Finalize todos antes de concluir.")
+
+        # 🔴 REPROVADO se houver falha
+        if executions.filter(status='FALHOU').exists():
+            self.status = self.Status.FAILED
+        else:
+            self.status = self.Status.APPROVED
+
+        self.finished_at = timezone.now()
+        self.save()

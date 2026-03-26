@@ -22,7 +22,7 @@ from .serializers import (
 
  
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all()
+    queryset = User.objects.all().order_by('id')
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated, IsAdmin]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
@@ -35,7 +35,7 @@ class UserViewSet(viewsets.ModelViewSet):
         return [IsAuthenticated(), IsAdmin()]
     
     def get_serializer_class(self):
-        if self.action == 'retrieve':
+        if self.action == 'me':
             return UserMeSerializer
         return UserSerializer
     
@@ -187,7 +187,6 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def finalize(self, request, pk=None):
-
         session = self.get_object()
 
         signature = request.data.get("signature")
@@ -197,6 +196,8 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
                 {"detail": "Assinatura obrigatória"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        
+        session.signature = signature
 
         try:
 
@@ -225,6 +226,28 @@ class TestExecutionViewSet(viewsets.ModelViewSet):
     filterset_fields = ['session', 'test_case', 'status']
 
     http_method_names = ['get', 'patch', 'put']
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        if instance.session.status != ValidationSession.Status.IN_PROGRESS:
+            return Response(
+                {"detail": "Sessão finalizada. Não é permitido alterar execuções."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        return super().partial_update(request, *args, **kwargs)
+    
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        if instance.session.status != ValidationSession.Status.IN_PROGRESS:
+            return Response(
+                {"detail": "Sessão finalizada. Não é permitido alterar execuções."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        return super().update(request, *args, **kwargs)
  
 class EvidenceViewSet(viewsets.ModelViewSet):
 

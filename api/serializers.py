@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.db import transaction
-from .models import (UserProfile, GMUDVersion, TestPlan, TestCase, TestExecution, Evidence, AuditLog, ValidationSession)
+from .models import (UserProfile, GMUDVersion, TestPlan, TestCase, TestExecution, Evidence, AuditLog, ValidationSession, ValidationAccessKey)
 
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
@@ -147,13 +147,14 @@ class EvidenceSerializer(serializers.ModelSerializer):
         read_only_fields = ('created_at',)
 
     def validate_file(self, value):
-
-        max_size = 10 * 1024 * 1024  # 10MB
+        max_size = 10 * 1024 * 1024
+        valid_types = ['image/png', 'image/jpeg', 'application/pdf']
 
         if value.size > max_size:
-            raise serializers.ValidationError(
-                "Arquivo muito grande (máximo 10MB)"
-            )
+            raise serializers.ValidationError("Arquivo muito grande (máx 10MB)")
+
+        if value.content_type not in valid_types:
+            raise serializers.ValidationError("Tipo de arquivo não permitido")
 
         return value
 
@@ -163,10 +164,10 @@ class TestExecutionInlineSerializer(serializers.ModelSerializer):
         read_only=True
     )
 
-    executed_by_name = serializers.CharField(
-        source='executed_by.get_full_name',
-        read_only=True
-    )
+    executed_by_name = serializers.SerializerMethodField()
+    
+    def get_executed_by_name(self, obj):
+        return obj.executed_by.get_full_name() or obj.executed_by.username
 
     evidences = EvidenceSerializer(many=True, read_only=True)
 
@@ -212,9 +213,10 @@ class TestCaseDetailSerializer(serializers.ModelSerializer):
         model = TestCase
         fields = (
             'id',
-            'name',
             'description',
             'order_index',
+            'executions_count',
+            'executions'
         )
 
     def get_execution_count(self, obj):
@@ -241,15 +243,20 @@ class TestPlanDetailSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     responsible_name = serializers.CharField(source='responsible.username', read_only=True)
     test_cases = TestCaseSerializer(many=True, required=False)
+    current_validation_session_id = serializers.SerializerMethodField()
 
     class Meta:
         model = TestPlan
         fields = (
             'id', 'name', 'description', 'division', 'system', 'environment', 'validation_type',
-            'status', 'access_key', 'gmud_version', 'created_by', 'created_by_name', 'responsible', 
-            'responsible_name', 'test_cases', 'created_at', 'updated_at'
+            'status', 'gmud_version', 'created_by', 'created_by_name', 'responsible', 
+            'responsible_name', 'test_cases', 'created_at', 'updated_at', 'current_validation_session_id'
         )
         read_only_fields = ('created_by', 'access_key', 'status', 'created_at', 'updated_at')
+
+    def get_current_validation_session_id(self, obj):
+        session = obj.sessions.order_by('-started_at').first()
+        return session.id if session else None
 
     def create(self, validated_data):
 
@@ -269,6 +276,14 @@ class TestExecutionSerializer(serializers.ModelSerializer):
         model = TestExecution
         fields = ('id', 'session', 'test_case', 'executed_by', 'executed_by_name', 'status', 'comment', 'executed_at')
         read_only_fields = ('executed_by', 'executed_at')
+
+    def create(self, validated_data):
+        validated_data['executed_by'] = self.context['request'].user
+        return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        validated_data['executed_by'] = self.context['request'].user
+        return super().update(instance, validated_data)
     
     def validate(self, data):
         test_case = data.get('test_case') or self.instance.test_case
@@ -308,17 +323,20 @@ class ValidationSessionSerializer(serializers.ModelSerializer):
     test_plan_name = serializers.CharField(source='test_plan.name', read_only=True)
     test_plan_environment = serializers.CharField(source='test_plan.environment', read_only=True)
     test_plan_division = serializers.CharField(source='test_plan.division', read_only=True)
+    access_key = serializers.CharField(source='test_plan.access_key', read_only=True)
 
     class Meta:
         model = ValidationSession
         fields = (
             'id',
-            'test_plan',
+            'setor',
+            'access_key',
+            'test_plan',            
             'gmud_version',
             'test_plan_system',
             'test_plan_division',
             'test_plan_environment',
-            'test_plan_name',
+            'test_plan_name',            
             'started_by',
             'started_by_name',
             'status',

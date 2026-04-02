@@ -4,14 +4,16 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from .permissions import IsAdmin, IsAuditorOrAdmin, IsOwnerOrAdmin
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db import transaction
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
+from django.db.models import F
 import secrets
 from django.utils import timezone
  
 from .models import (
     UserProfile, GMUDVersion, TestPlan, TestCase,
-    TestExecution, Evidence, AuditLog, ValidationSession
+    TestExecution, Evidence, AuditLog, ValidationSession, ValidationAccessKey
 )
 from .serializers import (
     UserSerializer, UserProfileSerializer, UserMeSerializer,
@@ -66,23 +68,20 @@ class TestPlanViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
     
     def get_permissions(self):
-        if self.action in ['create','update', 'partial_update', 'destroy', 'add_test_case', 'access_key']:
+        if self.action in ['create','update', 'partial_update', 'destroy', 'add_test_case', 'preparar', 'generate_keys']:
             return [IsAuthenticated(), IsAuditorOrAdmin()]
         return [IsAuthenticated()]
     
     def get_serializer_class(self):
-        if self.action in ['retrieve', 'by_key', 'create']:
+        if self.action in ['retrieve', 'create']:
             return TestPlanDetailSerializer
         return TestPlanListSerializer
     
     def perform_create(self, serializer):
 
-        access_key = f"VAL-{secrets.token_hex(8).upper()}"
-
         plan = serializer.save(
             created_by=self.request.user,
             responsible=self.request.user,
-            access_key=access_key
     )
 
         AuditLog.objects.create(
@@ -91,6 +90,16 @@ class TestPlanViewSet(viewsets.ModelViewSet):
             entity='TestPlan',
             entity_id=plan.id
     )
+        
+    @action(detail=True, methods=['post'])
+    def preparar(self, request, pk=None):
+        plan = self.get_object()
+
+        try:
+            plan.preparar_para_teste()
+            return Response({"detail": "Plano pronto para validação"})
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=400)
     
     @action(detail=True, methods=['post'])
     def add_test_case(self, request, pk=None):
@@ -108,22 +117,44 @@ class TestPlanViewSet(viewsets.ModelViewSet):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-    @action(detail=False, methods=['get'], url_path='by-key/(?P<access_key>[^/.]+)')
-    def by_key(self, request, access_key=None):
-        try:
-            test_plan = TestPlan.objects.get(access_key=access_key)
-            serializer = self.get_serializer(test_plan)
-            return Response(serializer.data)
-        except TestPlan.DoesNotExist:
-            return Response(
-                {"detail": "TestPlan not found."},
-                status=status.HTTP_404_NOT_FOUND
-            )
     @action(detail=True, methods=['post'])
     def configurar(self, request, pk=None):
         plan = self.get_object()
         plan.configurar()
         return Response({"detail": "Plano configurado com sucesso"})
+    
+    @action(detail=True, methods=['post'], url_path='generate-keys')
+    def generate_keys(self, request, pk=None):
+        test_plan = self.get_object()
+
+        keys_data = request.data.get('keys', [])
+
+        if not keys_data:
+            return Response({"error": "Informe ao menos um setor"}, status=400)
+
+        created_keys = []
+
+        for item in keys_data:
+            setor = item.get('setor')
+
+            if not setor:
+                return Response ({"error": "Setor é obrigatório"}, status=400)
+            
+            quantidade = item.get('quantidade', 1)
+
+            for _ in range(quantidade):
+                key = ValidationAccessKey.objects.create(
+                    key=f"VAL-{secrets.token_hex(8).upper()}",
+                    test_plan=test_plan,
+                    setor=setor,
+                    max_uses=1
+                )
+                created_keys.append(key.key)
+
+        return Response({
+            "message": "Keys geradas com sucesso",
+            "keys": created_keys
+        })
     
 class TestCaseViewSet(viewsets.ModelViewSet):
     queryset = TestCase.objects.all()
@@ -151,39 +182,82 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
     ordering = ['-started_at']
 
     def create(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Use o endpoint /enter-with-key"},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED
+        )
+    
+    @action(detail=False, methods=['post'], url_path='enter-with-key')
+    def enter_with_key(self, request):
 
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            key_value = request.data.get('key')
 
-        test_plan = serializer.validated_data["test_plan"]
+            if not key_value:
+                return Response({"error": "Key é obrigatória"}, status=400)
 
-        # verifica se já existe sessão ativa
-        existing_session = ValidationSession.objects.filter(
-            test_plan=test_plan,
-            status=ValidationSession.Status.IN_PROGRESS
-        ).first()
+            key = ValidationAccessKey.objects.select_for_update().filter(key=key_value).first()
 
-        # se existir, retorna ela
-        if existing_session:
-            output_serializer = self.get_serializer(existing_session)
-            return Response(output_serializer.data, status=status.HTTP_200_OK)
+            if not key:
+                return Response({"error": "Key Inválida"}, status=400)
 
-        # cria nova sessão
-        session = serializer.save(started_by=request.user)
+            if key.test_plan.status not in ['READY', 'IN_PROGRESS']:
+                return Response(
+                    {"error": "Plano não disponível para validação"},
+                    status=400
+                )
 
-        # cria execuções para cada caso de teste
-        test_cases = session.test_plan.test_cases.filter(active=True)
+            # 🔒 valida limite de uso
+            if key.used_count >= key.max_uses:
+                return Response({"error": "Key já atingiu o limite de uso"}, status=400)
 
-        for case in test_cases:
-            TestExecution.objects.create(
-                session=session,
-                test_case=case,
-                status="PENDENTE",
-                executed_by=request.user
+            # 🔍 verifica se usuário já tem session nesse setor + test_plan
+            existing_session = ValidationSession.objects.filter(
+                test_plan=key.test_plan,
+                setor=key.setor,
+                started_by=request.user
+            ).first()
+
+            if existing_session:
+                if existing_session.status == ValidationSession.Status.COMPLETED:
+                    return Response({"error": "Sessão já finalizada"}, status=400)
+                
+                return Response({
+                    "message": "Sessão já existente",
+                    "session_id": existing_session.id
+                })
+
+            # 🚀 cria nova session
+            session = ValidationSession.objects.create(
+                test_plan=key.test_plan,
+                setor=key.setor,
+                started_by=request.user
             )
 
-        output_serializer = self.get_serializer(session)
-        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+            # 🔥 cria executions automaticamente
+            test_cases = key.test_plan.test_cases.filter(active=True)
+
+            executions = [
+                TestExecution(
+                    session=session,
+                    test_case=tc,
+                    executed_by=request.user,
+                    status="PENDENTE"
+                )
+                for tc in test_cases
+            ]
+
+            TestExecution.objects.bulk_create(executions)
+
+            # 🔢 incrementa uso da key
+            ValidationAccessKey.objects.filter(pk=key.pk).update(
+                used_count=F('used_count') + 1
+            )
+
+            return Response({
+                "message": "Sessão criada com sucesso",
+                "session_id": session.id
+            }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
     def finalize(self, request, pk=None):

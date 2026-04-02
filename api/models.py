@@ -5,6 +5,7 @@ import uuid
 from django.conf import settings
 from django.utils import timezone
 from django.db.models import Q
+import secrets
 
 
 class UserProfile(models.Model):
@@ -44,9 +45,11 @@ class GMUDVersion(models.Model):
     
 class TestPlan(models.Model):
     STATUS_CHOICE = (
-    ('RASCUNHO', 'Rascunho'),
-    ('CONFIGURADA', 'Configurada'),
-    ('PRONTA_PARA_TESTE', 'Pronta para Teste'),
+    ('DRAFT', 'Em elaboração'),
+    ('READY', 'Pronto para validação'),
+    ('IN_PROGRESS', 'Em validação'),
+    ('VALIDATED_IN_PARTS', 'Validado em partes'),
+    ('VALIDATED', 'Validado'),
     )
 
     VALIDATION_TYPE_CHOICES = (
@@ -60,12 +63,12 @@ class TestPlan(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True, null=True)
+    setores = models.JSONField(default=list)
     division = models.CharField(max_length=100)
     system = models.CharField(max_length=100, null=True, blank=True)
     environment = models.CharField(max_length=50, null=True, blank=True)
     validation_type = models.CharField(max_length=50, choices=VALIDATION_TYPE_CHOICES)
-    status = models.CharField(max_length=30, choices=STATUS_CHOICE, default='RASCUNHO')
-    access_key = models.CharField(max_length=100, unique=True, validators=[MinLengthValidator(10)])
+    status = models.CharField(max_length=30, choices=STATUS_CHOICE, default='DRAFT')
     gmud_version = models.ForeignKey(GMUDVersion, on_delete=models.SET_NULL, null=True, blank=True, related_name= 'test_plans')
     created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name='created_test_plans')
     responsible = models.ForeignKey(User, on_delete=models.PROTECT, related_name='responsible_test_plans')
@@ -80,30 +83,25 @@ class TestPlan(models.Model):
             models.Index(fields=['-status']), 
             models.Index(fields=['created_by']),
 ]
-    
-    def configurar(self):
-        if self.status != 'RASCUNHO':
-            raise ValueError("Apenas planos em rascunho podem ser configurados.")
-
-        if not self.test_cases.exists():
-            raise ValueError("Plano precisa ter pelo menos um caso de teste.")
-
-        self.status = 'CONFIGURADA'
-        self.save(update_fields=['status'])
-
 
     def preparar_para_teste(self):
-        if self.status != 'CONFIGURADA':
+        if self.status != 'DRAFT':
             raise ValueError("Plano precisa estar configurado.")
+        
+        if not self.test_cases.exists():
+            raise ValueError("Plano precisa ter pelo menos um caso de teste")
+        
+        if not self.setores:
+            raise ValueError("Plano precisa ter pelo menos um setor definido")
+        
+        self.status = 'READY'
+        self.save(update_fields =['status'])
 
-        if not self.gmud_version:
-            raise ValueError("Plano precisa estar vinculado a uma GMUD.")
-
-        if self.sessions.filter(status='IN_PROGRESS').exists():
-            raise ValueError("Já existe sessão ativa para este plano.")
-
-        self.status = 'PRONTA_PARA_TESTE'
-        self.save(update_fields=['status'])
+        if not self.access_keys.exists():    
+            for setor in self.setores:
+                ValidationAccessKey.objects.create(
+                    test_plan=self, setor=setor,key=secrets.token_urlsafe(16)
+                )
 
     def __str__(self):
         return self.name
@@ -157,17 +155,8 @@ class TestExecution(models.Model):
     comment = models.TextField(blank=True, null=True)
     executed_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        ordering = ['-executed_at']
-        constraints = [
-            models.UniqueConstraint(
-                fields=['session', 'test_case'],
-                name='unique_execution_per_test_case_per_session'
-            )
-        ]
-
     def save(self, *args, **kwargs):
-        if self.session.status != "IN_PROGRESS":
+        if self.session.status != ValidationSession.Status.IN_PROGRESS:
             raise ValueError("Sessão finalizada. Não é permitido alterar execuções.")
 
         super().save(*args, **kwargs)
@@ -219,13 +208,13 @@ class AuditLog(models.Model):
 
 class ValidationSession(models.Model): 
     class Status(models.TextChoices): 
-        IN_PROGRESS = "IN_PROGRESS", "Em andamento" 
-        FAILED = "FAILED", "Reprovada" 
-        APPROVED = "APPROVED", "Aprovada" 
+        IN_PROGRESS = "IN_PROGRESS", "Em andamento"
+        COMPLETED = "COMPLETED", "Concluída" 
         ARCHIVED = "ARCHIVED", "Arquivada" 
         
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False) 
-    test_plan = models.ForeignKey( TestPlan, on_delete=models.CASCADE, related_name="sessions" ) 
+    test_plan = models.ForeignKey( TestPlan, on_delete=models.CASCADE, related_name="sessions" )
+    setor = models.CharField(max_length=100) 
     started_by = models.ForeignKey( User, on_delete=models.PROTECT, related_name="validation_sessions" ) 
     status = models.CharField( max_length=20, choices=Status.choices, default=Status.IN_PROGRESS ) 
     started_at = models.DateTimeField(auto_now_add=True) 
@@ -237,14 +226,7 @@ class ValidationSession(models.Model):
         ordering = ['-started_at'] 
         indexes = [ models.Index(fields=['test_plan']), 
                    models.Index(fields=['status']), ] 
-        
-        constraints = [
-            models.UniqueConstraint(
-                fields = ['test_plan'], 
-                          condition= Q(status='IN_PROGRESS'),
-                          name = 'unique_user_active_session')
-        ]
-        
+          
     def finalize(self):
         if self.status != self.Status.IN_PROGRESS:
             raise ValueError("Sessão já finalizada.")
@@ -260,12 +242,39 @@ class ValidationSession(models.Model):
         # 🔒 NOVA REGRA CRÍTICA
         if executions.filter(status='PENDENTE').exists():
             raise ValueError("Existem testes pendentes. Finalize todos antes de concluir.")
-
-        # 🔴 REPROVADO se houver falha
-        if executions.filter(status='FALHOU').exists():
-            self.status = self.Status.FAILED
-        else:
-            self.status = self.Status.APPROVED
+        
+        self.status = self.Status.COMPLETED
 
         self.finished_at = timezone.now()
-        self.save()
+        self.save(update_fields=['status', 'finished_at', 'signature', 'signed_at'])
+
+        self.update_test_plan_status()
+
+    def update_test_plan_status(self):
+        test_plan = self.test_plan
+        sessions = test_plan.sessions.all()
+
+        if not sessions.exists():
+            test_plan.status = 'READY'
+
+        elif sessions.filter(status=self.Status.IN_PROGRESS).exists():
+            test_plan.status = 'IN_PROGRESS'
+
+        elif sessions.filter(status=self.Status.COMPLETED).count() == sessions.count():
+            test_plan.status = 'VALIDATED'
+
+        elif sessions.filter(status=self.Status.COMPLETED).exists():
+            test_plan.status = 'VALIDATED_IN_PARTS'
+
+        else:
+            test_plan.status = 'READY'
+
+        test_plan.save(update_fields=['status'])
+
+class ValidationAccessKey(models.Model):
+    key = models.CharField(max_length=50, unique=True)
+    test_plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name='access_keys')
+    setor = models.CharField(max_length=100)
+    max_uses = models.IntegerField(default=1)
+    used_count = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)

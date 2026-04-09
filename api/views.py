@@ -149,7 +149,7 @@ class TestPlanViewSet(viewsets.ModelViewSet):
                     setor=setor,
                     max_uses=1
                 )
-                created_keys.append(key.key)
+                created_keys.append({"key":key.key, "setor": key.setor})
 
         return Response({
             "message": "Keys geradas com sucesso",
@@ -161,7 +161,7 @@ class TestCaseViewSet(viewsets.ModelViewSet):
     serializer_class = TestCaseSerializer
     permission_classes = [IsAuthenticated, IsAuditorOrAdmin]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['test_plan', 'active']
+    filterset_fields = ['test_plan', 'active', 'setor']
     ordering_fields = ['order_index', 'created_at']
     ordering = ['order_index']
 
@@ -169,6 +169,37 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         if self.action == 'retrieve':
             return TestCaseDetailSerializer
         return TestCaseSerializer
+    
+    def perform_create(self, serializer):
+        test_plan = serializer.validated_data.get("test_plan")
+        setor = serializer.validated_data.get("setor")
+
+        print("SALVANDO SETOR:", setor)
+
+        last_order = (
+            TestCase.objects
+            .filter(test_plan=test_plan, setor=setor)
+            .count()
+        )
+
+        serializer.save(order_index=last_order + 1)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+    
+        setor = self.request.query_params.get("setor")
+        test_plan = self.request.query_params.get("test_plan")
+
+        print("🔍 FILTRANDO SETOR:", setor)
+        print("🔍 FILTRANDO TEST_PLAN:", test_plan)
+
+        if setor:
+            queryset = queryset.filter(setor=setor)
+
+        if test_plan:
+            queryset = queryset.filter(test_plan=test_plan)
+
+        return queryset
     
 class ValidationSessionViewSet(viewsets.ModelViewSet):
 
@@ -182,10 +213,65 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
     ordering = ['-started_at']
 
     def create(self, request, *args, **kwargs):
-        return Response(
-            {"detail": "Use o endpoint /enter-with-key"},
-            status=status.HTTP_405_METHOD_NOT_ALLOWED
-        )
+        with transaction.atomic():
+            test_plan_id = request.data.get("test_plan_id")
+            setor = request.data.get("setor")
+
+            if not test_plan_id:
+                return Response({"error": "test_plan_id é obrigatório"}, status=400)
+
+            if not setor:
+                return Response({"error": "Setor é obrigatório"}, status=400)
+
+            try:
+                test_plan = TestPlan.objects.get(id=test_plan_id)
+            except TestPlan.DoesNotExist:
+                return Response({"error": "TestPlan não encontrado"}, status=404)
+
+            # 🚨 evitar duplicidade
+            existing_session = ValidationSession.objects.filter(
+                test_plan=test_plan,
+                setor=setor,
+                started_by=request.user
+            ).first()
+
+            if existing_session:
+                return Response({
+                    "message": "Sessão já existente",
+                    "session_id": existing_session.id
+                })
+
+            # 🚀 cria session
+            session = ValidationSession.objects.create(
+                test_plan=test_plan,
+                setor=setor,
+                started_by=request.user
+            )
+
+            # 🔥 cria executions
+            test_cases = test_plan.test_cases.filter(active=True)
+
+            executions = [
+                TestExecution(
+                    session=session,
+                    test_case=tc,
+                    executed_by=request.user,
+                    status="PENDENTE"
+                )
+                for tc in test_cases
+            ]
+
+            TestExecution.objects.bulk_create(executions)
+
+            # 🔥 atualiza setores do plano (AGORA FAZ SENTIDO)
+            if setor not in test_plan.setores:
+                test_plan.setores.append(setor)
+                test_plan.save()
+
+            return Response({
+                "message": "Sessão criada com sucesso",
+                "session_id": session.id
+            }, status=201)
     
     @action(detail=False, methods=['post'], url_path='enter-with-key')
     def enter_with_key(self, request):

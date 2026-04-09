@@ -112,6 +112,7 @@ class TestCase(models.Model):
     test_plan = models.ForeignKey(TestPlan, on_delete=models.CASCADE, related_name='test_cases')
     description = models.TextField()
     order_index = models.IntegerField()
+    setor = models.CharField(max_length=100)
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

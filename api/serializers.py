@@ -188,7 +188,7 @@ class TestExecutionInlineSerializer(serializers.ModelSerializer):
 class TestCaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestCase
-        fields = ('id', 'test_plan', 'description', 'order_index', 'active', 'created_at')
+        fields = ('id', 'test_plan', 'description', 'setor', 'order_index', 'active', 'created_at')
         read_only_fields = ('id', 'order_index', 'created_at')
 
     def create(self, validated_data):
@@ -231,7 +231,7 @@ class TestPlanListSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestPlan
         fields = (
-            'id', 'name', 'division', 'system', 'environment', 'status', 'validation_type', 
+            'id', 'name', 'division', 'system', 'setores', 'environment', 'status', 'validation_type', 
             'created_by', 'created_by_name', 'responsible', 'responsible_name', 'test_case_count', 'created_at'
         )
         read_only_fields = ('created_by', 'created_at')
@@ -240,19 +240,25 @@ class TestPlanListSerializer(serializers.ModelSerializer):
         return obj.test_cases.count()
         
 class TestPlanDetailSerializer(serializers.ModelSerializer):
-    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
-    responsible_name = serializers.CharField(source='responsible.username', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+    responsible_name = serializers.SerializerMethodField()
     test_cases = TestCaseSerializer(many=True, required=False)
     current_validation_session_id = serializers.SerializerMethodField()
 
     class Meta:
         model = TestPlan
         fields = (
-            'id', 'name', 'description', 'division', 'system', 'environment', 'validation_type',
+            'id', 'name', 'description', 'division', 'setores', 'system', 'environment', 'validation_type',
             'status', 'gmud_version', 'created_by', 'created_by_name', 'responsible', 
             'responsible_name', 'test_cases', 'created_at', 'updated_at', 'current_validation_session_id'
         )
         read_only_fields = ('created_by', 'access_key', 'status', 'created_at', 'updated_at')
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.get_full_name() or obj.created_by.username
+    
+    def get_responsible_name(self, obj):
+        return obj.responsible.get_full_name() or obj.responsible.username
 
     def get_current_validation_session_id(self, obj):
         session = obj.sessions.order_by('-started_at').first()

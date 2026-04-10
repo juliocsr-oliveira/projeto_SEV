@@ -127,29 +127,34 @@ class TestPlanViewSet(viewsets.ModelViewSet):
     def generate_keys(self, request, pk=None):
         test_plan = self.get_object()
 
+        if not test_plan.test_cases.exists():
+            return Response(
+            {"error": "Adicione pelo menos um caso de teste antes de gerar as keys"},
+            status=400
+        )
+
         keys_data = request.data.get('keys', [])
 
         if not keys_data:
             return Response({"error": "Informe ao menos um setor"}, status=400)
+        
+        if not test_plan.is_multivalidation and len(keys_data) > 1:
+            return Response(
+            {"error": "Plano não permite múltiplas validações"},
+            status=400)
 
         created_keys = []
 
-        for item in keys_data:
-            setor = item.get('setor')
-
-            if not setor:
-                return Response ({"error": "Setor é obrigatório"}, status=400)
+        for setor in test_plan.setores:
             
-            quantidade = item.get('quantidade', 1)
-
-            for _ in range(quantidade):
-                key = ValidationAccessKey.objects.create(
-                    key=f"VAL-{secrets.token_hex(8).upper()}",
-                    test_plan=test_plan,
-                    setor=setor,
-                    max_uses=1
-                )
-                created_keys.append({"key":key.key, "setor": key.setor})
+            key = ValidationAccessKey.objects.create(
+                key=f"VAL-{secrets.token_hex(8).upper()}",
+                test_plan=test_plan,
+                setor=setor,
+                max_uses=1
+            )
+            
+            created_keys.append({"key":key.key, "setor": key.setor})
 
         return Response({
             "message": "Keys geradas com sucesso",
@@ -292,6 +297,12 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
                     {"error": "Plano não disponível para validação"},
                     status=400
                 )
+            
+            if not key.test_plan.is_multivalidation:
+                if ValidationSession.objects.filter(test_plan=key.test_plan).exists():
+                    return Response(
+                        {"error": "Plano permite apenas uma validação"}, status=400
+                    )
 
             # 🔒 valida limite de uso
             if key.used_count >= key.max_uses:

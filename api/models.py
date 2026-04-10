@@ -74,6 +74,7 @@ class TestPlan(models.Model):
     responsible = models.ForeignKey(User, on_delete=models.PROTECT, related_name='responsible_test_plans')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_multivalidation = models.BooleanField(default=True)
 
     class Meta:
         verbose_name = 'Plano de Teste'
@@ -97,11 +98,16 @@ class TestPlan(models.Model):
         self.status = 'READY'
         self.save(update_fields =['status'])
 
-        if not self.access_keys.exists():    
-            for setor in self.setores:
-                ValidationAccessKey.objects.create(
-                    test_plan=self, setor=setor,key=secrets.token_urlsafe(16)
-                )
+        for setor in self.setores:
+            existing = ValidationAccessKey.objects.filter(test_plan=self,setor=setor).exists()
+
+        if not existing:
+            ValidationAccessKey.objects.create(
+                test_plan=self,
+                setor=setor,
+                key=f"VAL-{secrets.token_hex(8).upper()}",
+                max_uses=1
+            )
 
     def __str__(self):
         return self.name
@@ -279,3 +285,4 @@ class ValidationAccessKey(models.Model):
     max_uses = models.IntegerField(default=1)
     used_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+    used = models.BooleanField(default=False)

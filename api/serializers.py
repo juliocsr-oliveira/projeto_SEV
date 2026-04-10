@@ -243,16 +243,38 @@ class TestPlanDetailSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     responsible_name = serializers.SerializerMethodField()
     test_cases = TestCaseSerializer(many=True, required=False)
+    access_keys = serializers.SerializerMethodField()
     current_validation_session_id = serializers.SerializerMethodField()
 
     class Meta:
         model = TestPlan
         fields = (
-            'id', 'name', 'description', 'division', 'setores', 'system', 'environment', 'validation_type',
+            'id', 'name', 'description', 'division', 'setores', 'system','is_multivalidation', 'access_keys', 'environment', 'validation_type',
             'status', 'gmud_version', 'created_by', 'created_by_name', 'responsible', 
             'responsible_name', 'test_cases', 'created_at', 'updated_at', 'current_validation_session_id'
         )
         read_only_fields = ('created_by', 'access_key', 'status', 'created_at', 'updated_at')
+
+    def get_access_keys(self, obj):
+        keys = ValidationAccessKey.objects.filter(test_plan=obj, key__startswith="VAL-")
+
+        resultado = {}
+
+        for key in keys:
+            setor = key.setor
+
+            if not setor or setor == "default":
+                continue
+
+            if setor not in resultado:
+                resultado[setor] = []
+
+            resultado[setor].append({
+                "key": key.key,
+                "used": key.used
+            })
+
+        return resultado
 
     def get_created_by_name(self, obj):
         return obj.created_by.get_full_name() or obj.created_by.username
@@ -272,6 +294,7 @@ class TestPlanDetailSerializer(serializers.ModelSerializer):
 
             for case in test_cases_data:
                 TestCase.objects.create(test_plan=test_plan, **case)
+
 
         return test_plan
 
@@ -329,14 +352,12 @@ class ValidationSessionSerializer(serializers.ModelSerializer):
     test_plan_name = serializers.CharField(source='test_plan.name', read_only=True)
     test_plan_environment = serializers.CharField(source='test_plan.environment', read_only=True)
     test_plan_division = serializers.CharField(source='test_plan.division', read_only=True)
-    access_key = serializers.CharField(source='test_plan.access_key', read_only=True)
 
     class Meta:
         model = ValidationSession
         fields = (
             'id',
             'setor',
-            'access_key',
             'test_plan',            
             'gmud_version',
             'test_plan_system',

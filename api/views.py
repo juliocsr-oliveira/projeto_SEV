@@ -145,7 +145,10 @@ class TestPlanViewSet(viewsets.ModelViewSet):
 
         created_keys = []
 
-        for setor in test_plan.setores:
+        for setor in keys_data:
+            existing = ValidationAccessKey.objects.filter(test_plan=test_plan, setor=setor).exists()
+
+            if existing:
             
             key = ValidationAccessKey.objects.create(
                 key=f"VAL-{secrets.token_hex(8).upper()}",

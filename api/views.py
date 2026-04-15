@@ -149,7 +149,8 @@ class TestPlanViewSet(viewsets.ModelViewSet):
             existing = ValidationAccessKey.objects.filter(test_plan=test_plan, setor=setor).exists()
 
             if existing:
-            
+                continue    
+
             key = ValidationAccessKey.objects.create(
                 key=f"VAL-{secrets.token_hex(8).upper()}",
                 test_plan=test_plan,
@@ -257,7 +258,7 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
             )
 
             # 🔥 cria executions
-            test_cases = test_plan.test_cases.filter(active=True)
+            test_cases = test_plan.test_cases.filter(active=True, setor=setor)
 
             executions = [
                 TestExecution(
@@ -335,7 +336,7 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
             )
 
             # 🔥 cria executions automaticamente
-            test_cases = key.test_plan.test_cases.filter(active=True)
+            test_cases = key.test_plan.test_cases.filter(active=True, setor=key.setor)
 
             executions = [
                 TestExecution(

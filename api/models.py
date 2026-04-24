@@ -222,7 +222,7 @@ class ValidationSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False) 
     test_plan = models.ForeignKey( TestPlan, on_delete=models.CASCADE, related_name="sessions" )
     setor = models.CharField(max_length=100) 
-    started_by = models.ForeignKey( User, on_delete=models.PROTECT, related_name="validation_sessions" ) 
+    started_by = models.ForeignKey( User, on_delete=models.PROTECT, related_name="validation_sessions", null=True, blank=True) 
     status = models.CharField( max_length=20, choices=Status.choices, default=Status.IN_PROGRESS ) 
     started_at = models.DateTimeField(auto_now_add=True) 
     finished_at = models.DateTimeField(null=True, blank=True)

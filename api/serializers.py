@@ -191,18 +191,31 @@ class TestCaseSerializer(serializers.ModelSerializer):
         fields = ('id', 'test_plan', 'description', 'setor', 'order_index', 'active', 'created_at')
         read_only_fields = ('id', 'order_index', 'created_at')
 
-    def create(self, validated_data):
-        test_plan = validated_data['test_plan']
+    def validate(self, data):
+        exists = TestCase.objects.filter(
+            test_plan=data["test_plan"],
+            setor=data["setor"],
+            description=data["description"]
+        ).exists()
 
-        last_case = (
-            TestCase.objects.filter(test_plan=test_plan)
-            .order_by('-order_index')
-            .first()
-        )
+        if exists:
+            raise serializers.ValidationError(
+                "Já existe um TestCase com essa descrição neste setor."
+            )
+
+        return data
+
+    def create(self, validated_data):
+        test_plan = validated_data["test_plan"]
+
+        last_case = TestCase.objects.filter(
+            test_plan=test_plan
+        ).order_by("-order_index").first()
 
         next_order = 1 if not last_case else last_case.order_index + 1
 
-        validated_data['order_index'] = next_order
+        validated_data["order_index"] = next_order
+
         return super().create(validated_data)
 
 class TestCaseDetailSerializer(serializers.ModelSerializer):
@@ -352,6 +365,15 @@ class ValidationSessionSerializer(serializers.ModelSerializer):
     test_plan_name = serializers.CharField(source='test_plan.name', read_only=True)
     test_plan_environment = serializers.CharField(source='test_plan.environment', read_only=True)
     test_plan_division = serializers.CharField(source='test_plan.division', read_only=True)
+    access_key = serializers.SerializerMethodField()
+
+    def get_access_key(self, obj):
+        key = ValidationAccessKey.objects.filter(
+            test_plan=obj.test_plan,
+            setor=obj.setor
+        ).first()
+
+        return key.key if key else None 
 
     class Meta:
         model = ValidationSession
@@ -370,7 +392,8 @@ class ValidationSessionSerializer(serializers.ModelSerializer):
             'started_at',
             'finished_at',
             'signature',
-            'executions'
+            'executions',
+            'access_key',
         )
         read_only_fields = (
             'started_by',

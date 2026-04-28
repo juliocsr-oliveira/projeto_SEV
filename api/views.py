@@ -223,53 +223,27 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
             except TestPlan.DoesNotExist:
                 return Response({"error": "TestPlan não encontrado"}, status=404)
 
-            # 🚨 evitar duplicidade
+            
             existing_session = ValidationSession.objects.filter(
                 test_plan=test_plan,
                 setor=setor,
-                started_by=request.user
             ).first()
 
-            if existing_session:
-                if existing_session.status == ValidationSession.Status.COMPLETED:
-                    return Response({"error": "Sessão finalizada"}, status=400)
-                
+            if existing_session:                
                 return Response({
                     "message": "Sessão já existente",
                     "session_id": existing_session.id
                 })
 
-            # 🚀 cria session
+            
             session = ValidationSession.objects.create(
                 test_plan=test_plan,
                 setor=setor,
-                started_by=None
+                started_by=None,
+                status=ValidationSession.Status.IN_PROGRESS
             )
 
-            # 🔥 cria executions
-            test_cases = test_plan.test_cases.filter(active=True, setor=setor)
-
-            executions = [
-                TestExecution(
-                    session=session,
-                    test_case=tc,
-                    executed_by=request.user,
-                    status="PENDENTE"
-                )
-                for tc in test_cases
-            ]
-
-            TestExecution.objects.bulk_create(executions)
-
-            # 🔥 atualiza setores do plano (AGORA FAZ SENTIDO)
-            if setor not in test_plan.setores:
-                test_plan.setores.append(setor)
-                test_plan.save()
-
-            return Response({
-                "message": "Sessão criada com sucesso",
-                "session_id": session.id
-            }, status=201)
+            return Response({"message": "Sessão criada com sucesso", "session_id": session.id}, status=201)
     
     @action(detail=False, methods=['post'], url_path='enter-with-key')
     def enter_with_key(self, request):
@@ -287,16 +261,32 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
             if key.test_plan.status not in ['READY', 'IN_PROGRESS']:
                 return Response({"error": "Plano não disponível para validação"},status=400)
             
-            # 🔍 verifica se usuário já tem session nesse setor + test_plan
+            
             existing_session = ValidationSession.objects.filter(
                 test_plan=key.test_plan,
                 setor=key.setor,
             ).first()
 
+            if not existing_session:
+                return Response({"error": "Sessão não encontrada"}, status=404)
+
             if existing_session.started_by is None:
                 existing_session.started_by = request.user
                 existing_session.status = ValidationSession.Status.IN_PROGRESS
-                existing_session.save(update_fields=['started_by', 'status'])
+                existing_session.save()
+
+                test_case = key.test_plan.test_cases.filter(
+                    active = True,
+                    setor=key.setor
+                )
+
+                for tc in test_case:
+                    TestExecution.objects.create(
+                    session=existing_session,
+                    test_case=tc,
+                    executed_by=request.user,
+                    status="PENDENTE"
+                )
 
                 return Response({
                     "message": "Sessão vinculada com sucesso",
@@ -314,48 +304,6 @@ class ValidationSessionViewSet(viewsets.ModelViewSet):
                     "message": "Sessão já existente",
                     "session_id": existing_session.id}, status=200)
             
-            if not key.test_plan.is_multivalidation:
-                if ValidationSession.objects.filter(test_plan=key.test_plan).exists():
-                    return Response(
-                        {"error": "Plano permite apenas uma validação"}, status=400
-                    )
-            
-            if key.used_count >= key.max_uses:
-                return Response({"error": "Key já atingiu o limite de uso."}, status=400)
-
-            # 🚀 cria nova session
-            session = ValidationSession.objects.create(
-                test_plan=key.test_plan,
-                setor=key.setor,
-                started_by=request.user
-            )
-
-            # 🔥 cria executions automaticamente
-            test_cases = key.test_plan.test_cases.filter(active=True, setor=key.setor)
-
-            executions = [
-                TestExecution(
-                    session=session,
-                    test_case=tc,
-                    executed_by=request.user,
-                    status="PENDENTE"
-                )
-                for tc in test_cases
-            ]
-
-            TestExecution.objects.bulk_create(executions)
-
-            # 🔢 incrementa uso da key
-            ValidationAccessKey.objects.filter(pk=key.pk).update(
-                used_count=F('used_count') + 1
-            )
-
-            return Response({
-                "message": "Sessão criada com sucesso",
-                "session_id": session.id
-            }, status=status.HTTP_201_CREATED)
-        
-
     @action(detail=True, methods=["post"])
     def finalize(self, request, pk=None):
         session = self.get_object()

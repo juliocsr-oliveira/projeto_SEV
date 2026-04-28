@@ -14,9 +14,6 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'role', 'active', 'role_write', 'active_write',) 
 
-    # ========================
-    # READ
-    # ========================
     def get_role(self, obj):
         if hasattr(obj, 'profile'):
             return obj.profile.role
@@ -27,11 +24,8 @@ class UserSerializer(serializers.ModelSerializer):
             return obj.profile.active
         return False
 
-    # ========================
-    # CREATE
-    # ========================
     def create(self, validated_data):
-        with transaction.atomic():  # 🔥 ISSO RESOLVE TUDO
+        with transaction.atomic():  
 
             role = validated_data.pop('role_write', 'TESTADOR')
             role = role.upper() if role else 'TESTADOR'
@@ -58,15 +52,10 @@ class UserSerializer(serializers.ModelSerializer):
 
             return user
 
-
-    # ========================
-    # UPDATE (EDITAR ROLE/STATUS)
-    # ========================
     def update(self, instance, validated_data):
         role = validated_data.pop('role_write', None)
         active = validated_data.pop('active_write', None)
 
-        # Atualiza dados básicos
         if 'first_name' in validated_data:
             instance.first_name = validated_data['first_name']
 
@@ -79,7 +68,6 @@ class UserSerializer(serializers.ModelSerializer):
 
         instance.save()
 
-        # Atualiza profile
         if hasattr(instance, 'profile'):
             if role:
                 instance.profile.role = role.upper()
@@ -228,7 +216,7 @@ class TestCaseDetailSerializer(serializers.ModelSerializer):
             'id',
             'description',
             'order_index',
-            'executions_count',
+            'execution_count',
             'executions'
         )
 
@@ -358,6 +346,8 @@ class AuditLogSerializer(serializers.ModelSerializer):
         )
 
 class ValidationSessionSerializer(serializers.ModelSerializer):
+    queryset = ValidationSession.objects.prefetch_related('executions', 'executions__test_case', 'executions__evidences', 
+                                                          'executions__executed_by')
     started_by_name = serializers.CharField(source='started_by.get_full_name', read_only=True)
     gmud_version = serializers.CharField(source='test_plan.gmud_version.version', read_only=True)
     executions = TestExecutionInlineSerializer(many=True, read_only=True)

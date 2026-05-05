@@ -185,9 +185,6 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         setor = self.request.query_params.get("setor")
         test_plan = self.request.query_params.get("test_plan")
 
-        print("🔍 FILTRANDO SETOR:", setor)
-        print("🔍 FILTRANDO TEST_PLAN:", test_plan)
-
         if setor:
             queryset = queryset.filter(setor=setor)
 

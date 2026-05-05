@@ -246,7 +246,6 @@ class ValidationSession(models.Model):
         if not executions.exists():
             raise ValueError("Não é possível finalizar sessão sem execuções.")
 
-        # 🔒 NOVA REGRA CRÍTICA
         if executions.filter(status='PENDENTE').exists():
             raise ValueError("Existem testes pendentes. Finalize todos antes de concluir.")
         

@@ -2,7 +2,7 @@ from rest_framework.permissions import BasePermission
 
 
 class IsAuditorOrAdmin(BasePermission):
-    """Permite superuser, staff, auditores e administradores"""
+    """Permite superuser, auditores e administradores"""
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False

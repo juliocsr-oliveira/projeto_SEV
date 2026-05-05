@@ -346,8 +346,7 @@ class AuditLogSerializer(serializers.ModelSerializer):
         )
 
 class ValidationSessionSerializer(serializers.ModelSerializer):
-    queryset = ValidationSession.objects.prefetch_related('executions', 'executions__test_case', 'executions__evidences', 
-                                                          'executions__executed_by')
+    queryset = ValidationSession.objects.prefetch_related('executions', 'executions__test_case', 'executions__evidences', 'executions__executed_by')
     started_by_name = serializers.CharField(source='started_by.get_full_name', read_only=True)
     gmud_version = serializers.CharField(source='test_plan.gmud_version.version', read_only=True)
     executions = TestExecutionInlineSerializer(many=True, read_only=True)
